@@ -30,6 +30,15 @@ jobs:
           restore-keys: |
             bazel-cache-${{ runner.os }}-
 
+      - name: Check Go formatting
+        run: |
+          bazel run @io_bazel_rules_go//go -- fmt ./...
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "Go files are not formatted. Please run: bazel run @io_bazel_rules_go//go -- fmt ./..."
+            git --no-pager diff
+            exit 1
+          fi
+
       - name: Build
         run: bazel build //:client
 
