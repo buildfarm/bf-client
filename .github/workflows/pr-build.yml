@@ -32,9 +32,9 @@ jobs:
 
       - name: Check Go formatting
         run: |
-          bazel run @io_bazel_rules_go//go -- fmt ./...
+          bazel run @io_bazel_rules_go//go -- fmt $(pwd)/...
           if [[ -n "$(git status --porcelain)" ]]; then
-            echo "Go files are not formatted. Please run: bazel run @io_bazel_rules_go//go -- fmt ./..."
+            echo "Go files are not formatted. Please run: bazel run @io_bazel_rules_go//go -- fmt $(pwd)/..."
             git --no-pager diff
             exit 1
           fi
