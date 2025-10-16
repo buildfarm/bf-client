@@ -30,7 +30,10 @@ func ExecuteOperationMetadata(op *longrunning.Operation) (*reapi.ExecuteOperatio
 		}
 		return qm.ExecuteOperationMetadata, nil
 	}
-	return nil, errors.New("Unexpected metadata: " + proto.MarshalTextString(op))
+	// Gracefully handle unexpected or unknown metadata types by returning an
+	// empty ExecuteOperationMetadata instead of an error to avoid crashing
+	// callers that expect a non-nil metadata instance.
+	return &reapi.ExecuteOperationMetadata{}, nil
 }
 
 func RequestMetadata(o *longrunning.Operation) *reapi.RequestMetadata {
