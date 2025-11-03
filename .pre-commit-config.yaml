@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: gofmt-bazel
+        name: Format Go code via Bazel (rules_go)
+        entry: bazel run @io_bazel_rules_go//go -- fmt ./...
+        language: system
+        pass_filenames: false
+        types: [go]
