@@ -22,12 +22,3 @@ go_binary(
     embed = [":go_default_library"],
     visibility = ["//visibility:public"],
 )
-
-go_binary(
-    name = "test",
-    srcs = ["test.go"],
-    deps = [
-        "@com_github_golang_protobuf//proto:go_default_library",
-        "@remoteapis//build/bazel/remote/execution/v2:go_default_library",
-    ],
-)
