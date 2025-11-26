@@ -370,6 +370,8 @@ func (v *operationList) Update() {
 		if v.opcache.Contains(op.Name) {
 			continue
 		}
+		// avoid concurrent v.a.Ops map read/write
+		v.a.Mutex.Lock()
 		if o, ok := v.a.Ops[op.Name]; !ok || o == nil {
 			m := op.Metadata
 			if m == nil {
@@ -378,6 +380,7 @@ func (v *operationList) Update() {
 				go getExecution(v.a, op.Name, v.a.Conn, &wg)
 			}
 		}
+		v.a.Mutex.Unlock()
 	}
 	wg.Wait()
 	v.opNames = make([]string, 0)
