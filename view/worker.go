@@ -554,12 +554,18 @@ func pausedStyle(p bool) ui.Style {
 func (v *worker) Update() {
 	conn := v.a.GetWorkerConn(v.w, v.a.CA)
 	workerProfile := bfpb.NewWorkerProfileClient(conn)
-	profile, err := workerProfile.GetWorkerProfile(context.Background(), &bfpb.WorkerProfileRequest{})
+	profile, err := workerProfile.GetWorkerProfile(context.Background(), &bfpb.WorkerProfileRequest{
+		InstanceName: "shard",
+		WorkerName:   v.w,
+	})
 	if err == nil {
 		v.profile = profile
 	}
 	c := bfpb.NewWorkerControlClient(conn)
-	r, err := c.PipelineChange(context.Background(), &bfpb.WorkerPipelineChangeRequest{})
+	r, err := c.PipelineChange(context.Background(), &bfpb.WorkerPipelineChangeRequest{
+		InstanceName: "shard",
+		WorkerName:   v.w,
+	})
 	if err != nil {
 		panic(err)
 	}
