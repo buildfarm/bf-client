@@ -14,6 +14,7 @@ go_library(
         "search_results.go",
         "settings.go",
         "test.go",
+        "text_entry.go",
         "util.go",
         "view.go",
         "worker.go",

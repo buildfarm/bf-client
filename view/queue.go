@@ -15,6 +15,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -120,6 +121,17 @@ func NewQueue(a *client.App, selected int) *Queue {
 	return q
 }
 
+func getNumber(title string, v View, action func(int) bool) View {
+	return NewTextEntry(title, func(s string) bool {
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			return false
+		}
+
+		return action(n)
+	}, v)
+}
+
 func (v *Queue) Handle(e ui.Event) View {
 	switch e.ID {
 	case "<Escape>", "q", "<C-c>":
@@ -144,6 +156,19 @@ func (v *Queue) Handle(e ui.Event) View {
 			v.stats.ScrollUp()
 		} else {
 			v.meter.ScrollUp()
+		}
+	case "E":
+		if !v.stats.Focused {
+			return getNumber("Execute Width", v, func(width int) bool {
+				if (width < 0) {
+					return false
+				}
+				for _, worker := range v.s.workers {
+					w := NewWorker(v.a, worker, v)
+					w.changeWidth(int32(width))
+				}
+				return true
+			})
 		}
 	case "h", "<Left>":
 		if v.stats.Focused {
