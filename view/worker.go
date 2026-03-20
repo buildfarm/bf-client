@@ -21,6 +21,11 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+type filter interface {
+	includes(*stageEx) bool
+	// String() string
+}
+
 type worker struct {
 	a       *client.App
 	v       View
@@ -39,6 +44,7 @@ type worker struct {
 	field              int
 	reversed           bool
 	fetches            map[string]time.Time
+	filters            []filter
 }
 
 func NewStageList() *client.List {
@@ -204,6 +210,17 @@ func (v *worker) Handle(e ui.Event) View {
 	case "<Escape>", "q", "<C-c>":
 		ui.Clear()
 		return v.v
+	case "F":
+		if len(v.filters) == 0 {
+			v.filters = []filter {
+				&propertyFilter {
+					name: "gpu",
+					value: "1",
+				},
+			}
+		} else {
+			v.filters = []filter {}
+		}
 	case "X":
 		v.cancelOperation()
 	case "<Enter>":
@@ -255,6 +272,7 @@ type stageEx struct {
 	mnemonic string
 	build    string
 	done     bool
+	action  *reapi.Action
 }
 
 func (e stageEx) label() string {
@@ -276,6 +294,18 @@ func reasonableDuration(d time.Duration) time.Duration {
 	return d.Truncate(1 * time.Millisecond)
 }
 
+func gpu(a *reapi.Action) string {
+	if (a == nil) {
+		return ""
+	}
+	for _, property := range a.Platform.Properties {
+		if property.Name == "gpu" && property.Value == "1" {
+			return " gpu"
+		}
+	}
+	return ""
+}
+
 func (e stageEx) String() string {
 	if e.errored {
 		return fmt.Sprintf("[%s](fg:black,bg:red)", e.label())
@@ -288,6 +318,7 @@ func (e stageEx) String() string {
 			end = e.final
 		}
 		label += " " + reasonableDuration(end.Sub(e.fence)).String()
+		label += gpu(e.action)
 	}
 	if e.stalled {
 		label = fmt.Sprintf("[%s](fg:black,bg:blue)", label)
@@ -341,13 +372,51 @@ func (s *execSorter) Less(i, j int) bool {
 	return !s.by(s.executions[i], s.executions[j])
 }
 
+type propertyFilter struct {
+	name string
+	value string
+}
+
+func (p *propertyFilter) includes(ex *stageEx) bool {
+	for _, property := range ex.action.Platform.Properties {
+		if property.Name == p.name && property.Value == p.value {
+			return true
+		}
+	}
+	return false
+}
+
+func (v *worker) filter(ex *stageEx) bool {
+	if len(v.filters) == 0 {
+		return true
+	}
+	for _, filter := range v.filters {
+		if !filter.includes(ex) {
+			return false
+		}
+	}
+	return true
+}
+
 func (v *worker) populateExecutions(l *client.List, stage string, r []string) {
 	r = filterEmpty(r)
-	rows := make([]fmt.Stringer, len(r))
-	for i, name := range r {
+	// rows := make([]fmt.Stringer, len(r))
+	rows := []fmt.Stringer{}
+	for _, name := range r {
 		ex := &stageEx{field: func() int { return v.field }, name: name}
 		op, ok := v.a.Ops[name]
 		if ok {
+			em, err := client.ExecuteOperationMetadata(op)
+			if err != nil {
+				continue
+			}
+	    actionDigest := renderDigest(*em.ActionDigest, em.DigestFunction)
+			a, action_ok := v.a.Actions[actionDigest]
+			if !action_ok {
+				continue
+			}
+			ex.action = a
+
 			stalled, fence, err := stageFenced(op, stage)
 			if err != nil {
 				// non-result complete operation
@@ -362,8 +431,12 @@ func (v *worker) populateExecutions(l *client.List, stage string, r []string) {
 			ex.target = m.TargetId
 			ex.mnemonic = m.ActionMnemonic
 			ex.build = m.CorrelatedInvocationsId
+
+			if !v.filter(ex) {
+				continue
+			}
 		}
-		rows[i] = ex
+		rows = append(rows, ex)
 	}
 	fence := func(e1, e2 fmt.Stringer) bool {
 		stageEx1, stageEx2 := e1.(*stageEx), e2.(*stageEx)
@@ -441,6 +514,19 @@ func getExecution(a *client.App, name string, conn *grpc.ClientConn, wg *sync.Wa
 	}
 }
 
+func getAction(a *client.App, em *reapi.ExecuteOperationMetadata, conn *grpc.ClientConn, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	action := &reapi.Action{}
+	err := client.Expect(a.Conn, client.ToDigest(*em.ActionDigest, em.DigestFunction), action)
+	if err == nil {
+		actionDigest := renderDigest(*em.ActionDigest, em.DigestFunction)
+		a.Mutex.Lock()
+		a.Actions[actionDigest] = action
+		a.Mutex.Unlock()
+	}
+}
+
 func (v worker) Render() []ui.Drawable {
 	v.title.Text = fmt.Sprintf(
 		"%s CAS Count: %d Size: %s (%d%%) Unref: %d%%",
@@ -504,6 +590,16 @@ func (v worker) Render() []ui.Drawable {
 		}
 		wg.Wait() // really needs to move to Update
 
+		wg = sync.WaitGroup{}
+		for _, name := range fetches {
+			em, err := client.ExecuteOperationMetadata(v.a.Ops[name])
+			if err == nil {
+				wg.Add(1)
+				go getAction(v.a, em, v.a.Conn, &wg)
+			}
+		}
+		wg.Wait()
+
 		switch stage.Name {
 		case "MatchStage":
 			v.populateExecutions(v.match, stage.Name, stage.OperationNames)
@@ -533,7 +629,7 @@ func (v worker) Render() []ui.Drawable {
 	v.inputFetch.SetRect(0, row, 80, row+2+inputFetchHeight)
 	row += 2 + inputFetchHeight
 	// executeRows := len(v.execute.Rows)
-	executeHeight := 5
+	executeHeight := 7
 	v.execute.SetRect(0, row, 80, row+2+executeHeight)
 	row += 2 + executeHeight
 	// reportResultRows := len(v.reportResult.Rows)

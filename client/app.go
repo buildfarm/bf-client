@@ -27,6 +27,7 @@ type App struct {
 	Conn             *grpc.ClientConn
 	workerConns      map[string]*grpc.ClientConn
 	Ops              map[string]*longrunning.Operation
+	Actions          map[string]*reapi.Action
 	Metadatas        map[string]*reapi.RequestMetadata
 	Invocations      map[string][]string
 	Fetches          uint
@@ -45,6 +46,7 @@ func NewApp(redisHost string, reapiHost string, ca string) *App {
 		CA:          ca,
 		Done:        false,
 		Ops:         make(map[string]*longrunning.Operation),
+		Actions:     make(map[string]*reapi.Action),
 		Metadatas:   make(map[string]*reapi.RequestMetadata),
 		Invocations: make(map[string][]string),
 		workerConns: make(map[string]*grpc.ClientConn),
