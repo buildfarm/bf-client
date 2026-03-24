@@ -271,7 +271,7 @@ func (v *Queue) Update() {
 	}
 	start := time.Now()
 	st, err := c.Status(context.Background(), &bfpb.BackplaneStatusRequest{
-		InstanceName: "shard",
+		InstanceName: v.a.Instance,
 	})
 	v.a.LastReapiLatency = time.Since(start)
 	if err == nil {

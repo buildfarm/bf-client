@@ -61,7 +61,7 @@ func NewOperationList(a *client.App, mode int, v View) *operationList {
 		start := time.Now()
 		a.Fetches++
 		status, err := c.Status(context.Background(), &bfpb.BackplaneStatusRequest{
-			InstanceName: "shard",
+			InstanceName: a.Instance,
 		})
 		a.LastReapiLatency = time.Since(start)
 		if err != nil {
