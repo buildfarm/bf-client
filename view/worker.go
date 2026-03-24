@@ -355,13 +355,21 @@ func (v *worker) populateExecutions(l *client.List, stage string, r []string) {
 			} else {
 				ex.stalled, ex.fence = stalled, fence
 			}
-			m := client.RequestMetadata(op)
+			// Try cached metadata first, then extract from operation; avoid panicking if unavailable
+			m := v.a.Metadatas[name]
 			if m == nil {
-				panic(op)
+				m = client.RequestMetadata(op)
 			}
-			ex.target = m.TargetId
-			ex.mnemonic = m.ActionMnemonic
-			ex.build = m.CorrelatedInvocationsId
+			if m != nil {
+				ex.target = m.TargetId
+				ex.mnemonic = m.ActionMnemonic
+				ex.build = m.CorrelatedInvocationsId
+			} else {
+				// Fall back to placeholders if metadata is not present
+				ex.target = "unknown"
+				ex.mnemonic = "unknown"
+				ex.build = "unknown"
+			}
 		}
 		rows[i] = ex
 	}
