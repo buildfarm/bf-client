@@ -106,6 +106,14 @@ func (v *actionView) Handle(e ui.Event) View {
 	return v
 }
 
+func reDigestString(d reapi.Digest, df reapi.DigestFunction_Value) string {
+	return client.DigestString(bfpb.Digest{
+		Hash:           d.Hash,
+		Size:           d.SizeBytes,
+		DigestFunction: df,
+	})
+}
+
 func (v *actionView) Update() {
 	if v.action == nil {
 		a := &reapi.Action{}
@@ -118,8 +126,12 @@ func (v *actionView) Update() {
 		content := `
     <div>Command: <a href="command:%[1]s">%[1]s</a></div>
     <div>Input Root: <a href="input:%[2]s">%[2]s</a></div>`
-		command := renderREDigest(*a.CommandDigest, v.d.DigestFunction, false)
-		inputRoot := renderREDigest(*a.InputRootDigest, v.d.DigestFunction, false)
+		command := reDigestString(*a.CommandDigest, v.d.DigestFunction)
+		if a.InputRootDigest == nil {
+			// seen with bfssh
+			a.InputRootDigest = &reapi.Digest{}
+		}
+		inputRoot := reDigestString(*a.InputRootDigest, v.d.DigestFunction)
 		content = fmt.Sprintf(content, command, inputRoot)
 		if len(a.Platform.Properties) > 0 {
 			content += "<h2>Platform:</h2><ul>"

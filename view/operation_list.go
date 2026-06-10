@@ -34,7 +34,7 @@ type operationList struct {
 	Filter     string
 	Select     map[string]string
 	Name       string
-	a          *client.App
+	c          client.Component
 	opNames    []string
 	ops        []*longrunning.Operation
 	prevNames  map[string]*longrunning.Operation
@@ -53,17 +53,17 @@ type operationList struct {
 	debug        bool
 }
 
-func NewOperationList(a *client.App, mode int, v View) *operationList {
+func NewOperationList(c client.Component, mode int, v View) *operationList {
 	opcache, _ := lru.New[string, operation](10000)
 	var queues []*client.Queue
 	if mode != 3 {
-		c := bfpb.NewOperationQueueClient(a.Conn)
+		cl := bfpb.NewOperationQueueClient(c.App().Conn)
 		start := time.Now()
-		a.Fetches++
-		status, err := c.Status(context.Background(), &bfpb.BackplaneStatusRequest{
+		c.App().Fetches++
+		status, err := cl.Status(context.Background(), &bfpb.BackplaneStatusRequest{
 			InstanceName: "shard",
 		})
-		a.LastReapiLatency = time.Since(start)
+		c.App().LastReapiLatency = time.Since(start)
 		if err != nil {
 			panic(err)
 		}
@@ -76,13 +76,13 @@ func NewOperationList(a *client.App, mode int, v View) *operationList {
 			}
 		}
 		for _, name := range names {
-			queues = append(queues, client.NewQueue(context.Background(), a.Client, name))
+			queues = append(queues, client.NewQueue(context.Background(), c.App().Client, name))
 		}
 	}
 	return &operationList{
 		Name:       "executions",
 		list:       client.NewList(),
-		a:          a,
+		c:          c,
 		mode:       mode,
 		opcache:    opcache,
 		field:      0,
@@ -97,7 +97,7 @@ func NewOperationList(a *client.App, mode int, v View) *operationList {
 func (v operationList) fetchQueues(max int64, cb func(string) (*client.Operation, error)) []*client.Operation {
 	var ops []*client.Operation
 	for _, queue := range v.queues {
-		ops = append(ops, queue.Slice(context.Background(), v.a.Client, 0, max, cb)...)
+		ops = append(ops, queue.Slice(context.Background(), v.c.App().Client, 0, max, cb)...)
 		if int64(len(ops)) >= max {
 			break
 		}
@@ -112,13 +112,13 @@ func (v *operationList) fetchIteration(c longrunning.OperationsClient) {
 	// TODO put retries into next iteration cycle
 	for retry = 5; r == nil && retry > 0; retry-- {
 		req := &longrunning.ListOperationsRequest{
-			Name:      fmt.Sprintf("%s/%s", v.a.Instance, v.Name),
+			Name:      fmt.Sprintf("%s/%s", v.c.App().Instance, v.Name),
 			Filter:    v.Filter,
 			PageSize:  100,
 			PageToken: v.fetchToken,
 		}
 		var err error
-		v.a.Fetches++
+		v.c.App().Fetches++
 		r, err = c.ListOperations(context.Background(), req)
 		if err != nil {
 			st, ok := status.FromError(err)
@@ -140,7 +140,7 @@ func (v *operationList) fetchIteration(c longrunning.OperationsClient) {
 		page = append(page, op)
 		m := client.RequestMetadata(op)
 		if m != nil {
-			addOpcache(v.a, v.opcache, op, m)
+			addOpcache(v.c.App(), v.opcache, op, m)
 		}
 	}
 	v.fetchToken = r.NextPageToken
@@ -183,7 +183,7 @@ func (v *operationList) fetchFiltered(filter string, name string) []*client.Oper
 	}
 
 	if v.stall == 0 {
-		c := longrunning.NewOperationsClient(v.a.Conn)
+		c := longrunning.NewOperationsClient(v.c.App().Conn)
 		v.fetchIteration(c)
 	} else {
 		v.stall--
@@ -200,20 +200,20 @@ func (v *operationList) fetchFiltered(filter string, name string) []*client.Oper
 
 func (v operationList) xfetchFiltered(filter string, name string) []*client.Operation {
 	var ops []*client.Operation
-	c := longrunning.NewOperationsClient(v.a.Conn)
+	c := longrunning.NewOperationsClient(v.c.App().Conn)
 	for nextPageToken := "initial"; nextPageToken != ""; v.fetchToken = nextPageToken {
 		var retry int
 		var retryErr error = nil
 		var r *longrunning.ListOperationsResponse = nil
 		for retry = 5; r == nil && retry > 0; retry-- {
 			req := &longrunning.ListOperationsRequest{
-				Name:      fmt.Sprintf("%s/%s", v.a.Instance, name),
+				Name:      fmt.Sprintf("%s/%s", v.c.App().Instance, name),
 				Filter:    filter,
 				PageSize:  100,
 				PageToken: v.fetchToken,
 			}
 			var err error
-			v.a.Fetches++
+			v.c.App().Fetches++
 			r, err = c.ListOperations(context.Background(), req)
 			if err != nil {
 				st, ok := status.FromError(err)
@@ -241,7 +241,7 @@ func (v operationList) xfetchFiltered(filter string, name string) []*client.Oper
 func (v operationList) queuesLength() int64 {
 	var sum int64 = 0
 	for _, queue := range v.queues {
-		l, err := queue.Length(context.Background(), v.a.Client)
+		l, err := queue.Length(context.Background(), v.c.App().Client)
 		if err != nil {
 			panic(err)
 		}
@@ -267,7 +267,7 @@ func (v *operationList) fetch() []*client.Operation {
 
 func (v *operationList) createOperationView() View {
 	if len(v.opNames) > 0 {
-		return NewDocument(v.a, v.list.Rows[v.list.SelectedRow].(*stageEx).name, v)
+		return NewExecution(v.c, v.list.Rows[v.list.SelectedRow].(*stageEx).name, v)
 	}
 	return v
 }
@@ -304,7 +304,7 @@ func (v *operationList) Handle(e ui.Event) View {
 	case "<Enter>":
 		ui.Clear()
 		if v.grouped {
-			sv := NewOperationList(v.a, v.mode, v)
+			sv := NewOperationList(v.c, v.mode, v)
 			sv.Filter = v.Filter
 			sv.Select = selectField(v.field, v.list.Rows[v.list.SelectedRow].(*groupResult).name)
 			return sv
@@ -313,7 +313,7 @@ func (v *operationList) Handle(e ui.Event) View {
 				return v.createOperationView()
 			}
 			if v.Name == "toolInvocations" {
-				olv := NewOperationList(v.a, 4, v)
+				olv := NewOperationList(v.c, 4, v)
 				olv.Filter = "toolInvocationId=" + v.selectedName()
 				return olv
 			}
@@ -362,7 +362,8 @@ func addOpcache(a *client.App, opcache *lru.Cache[string, operation], o *longrun
 }
 
 func (v *operationList) Update() {
-	v.a.Fetches++
+	a := v.c.App()
+	a.Fetches++
 	ops := v.fetch()
 
 	var wg sync.WaitGroup
@@ -370,28 +371,28 @@ func (v *operationList) Update() {
 		if v.opcache.Contains(op.Name) {
 			continue
 		}
-		// avoid concurrent v.a.Ops map read/write
-		v.a.Mutex.Lock()
-		if o, ok := v.a.Ops[op.Name]; !ok || o == nil {
+		// avoid concurrent a.Ops map read/write
+		a.Mutex.Lock()
+		if o, ok := a.Ops[op.Name]; !ok || o == nil {
 			m := op.Metadata
 			if m == nil {
-				v.a.Fetches++
+				a.Fetches++
 				wg.Add(1)
-				go getExecution(v.a, op.Name, v.a.Conn, &wg)
+				go getExecution(a, op.Name, a.Conn, &wg)
 			}
 		}
-		v.a.Mutex.Unlock()
+		a.Mutex.Unlock()
 	}
 	wg.Wait()
 	v.opNames = make([]string, 0)
 	for _, op := range ops {
 		v.opNames = append(v.opNames, op.Name)
-		o, ok := v.a.Ops[op.Name]
+		o, ok := a.Ops[op.Name]
 		if !v.opcache.Contains(op.Name) && ok && o != nil {
 			m := client.RequestMetadata(o)
 			if m != nil {
-				addOpcache(v.a, v.opcache, o, m)
-				delete(v.a.Ops, op.Name)
+				addOpcache(a, v.opcache, o, m)
+				delete(a.Ops, op.Name)
 			}
 		}
 	}
@@ -567,7 +568,8 @@ func (v operationList) Render() []ui.Drawable {
 	v.list.Rows = rows
 	v.list.SelectedRowStyle = ui.NewStyle(ui.ColorBlack, ui.ColorWhite)
 	v.list.WrapText = false
-	v.list.SetRect(0, 0, 160, 30)
+	dimensions := v.c.Dimensions()
+	v.list.SetRect(0, 0, dimensions.Width, dimensions.Height)
 
 	content := []ui.Drawable{v.list}
 	debug := client.NewParagraph()

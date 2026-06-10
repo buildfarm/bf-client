@@ -5,9 +5,9 @@ go_library(
     srcs = [
         "action.go",
         "command.go",
-        "document.go",
+        "execution.go",
+        "file.go",
         "input.go",
-        "operation.go",
         "operation_list.go",
         "queue.go",
         "search.go",
@@ -39,5 +39,6 @@ go_library(
         "@org_golang_google_grpc//status:go_default_library",
         "@org_golang_x_net//html:go_default_library",
         "@remoteapis//build/bazel/remote/execution/v2:go_default_library",
+        "@org_golang_google_protobuf//encoding/prototext:go_default_library",
     ],
 )

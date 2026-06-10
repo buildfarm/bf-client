@@ -14,7 +14,7 @@ import (
 )
 
 type searchResults struct {
-	a         *client.App
+	c         client.Component
 	v         View
 	list      *client.List
 	resource  string
@@ -31,7 +31,7 @@ type searchResults struct {
 
 // input fetch failure keeps counting in that stage
 
-func NewSearchResults(resource string, filter string, value string, a *client.App, v View) View {
+func NewSearchResults(resource string, filter string, value string, c client.Component, v View) View {
 	list := client.NewList()
 	list.SelectedRowStyle = ui.NewStyle(ui.ColorBlack, ui.ColorWhite)
 	// move to app
@@ -39,10 +39,10 @@ func NewSearchResults(resource string, filter string, value string, a *client.Ap
 	list.SetRect(0, 0, w, h)
 	return &searchResults{
 		v:         v,
-		a:         a,
+		c:         c,
 		list:      list,
 		resource:  resource,
-		name:      fmt.Sprintf("%s/%s", a.Instance, resource),
+		name:      fmt.Sprintf("%s/%s", c.App().Instance, resource),
 		filter:    fmt.Sprintf("%s=%s", filter, value),
 		pageToken: "",
 	}
@@ -115,7 +115,7 @@ type ex struct {
 }
 
 func (e ex) label(r opRow) string {
-	return strings.TrimPrefix(e.name(), fmt.Sprintf("%s/executions/", r.s.a.Instance))
+	return strings.TrimPrefix(e.name(), fmt.Sprintf("%s/executions/", r.s.c.App().Instance))
 }
 
 func newEx(o *longrunning.Operation) *ex {
@@ -139,7 +139,7 @@ func (r opRow) String() string {
 }
 
 func (s *searchResults) fetch() []*longrunning.Operation {
-	c := longrunning.NewOperationsClient(s.a.Conn)
+	c := longrunning.NewOperationsClient(s.c.App().Conn)
 	request := &longrunning.ListOperationsRequest{
 		Name:      s.name,
 		Filter:    s.filter,
@@ -210,32 +210,16 @@ func (s *searchResults) fetchExecutionDetail() {
 }
 
 func (s *searchResults) fetchCorrelatedInvocationsDetail() {
-	for _, r := range s.opRows {
-		s.list.Rows = append(s.list.Rows, r)
+	if len(s.opRows) == 0 {
+		return
 	}
-	s.updateSelectedName()
-	s.fetchDetailsIndex = -1
-}
-
-func (s *searchResults) fetchDetails() {
-	switch s.resource {
-	case "executions":
-		s.fetchExecutionDetail()
-	case "toolInvocations":
-		s.fetchToolInvocationDetail()
-	case "correlatedInvocations":
-		s.fetchCorrelatedInvocationsDetail()
-	}
-}
-
-func (s *searchResults) fetchToolInvocationDetail() {
 	opRow := s.opRows[s.fetchDetailsIndex]
 	name := opRow.o.name()
-	c := longrunning.NewOperationsClient(s.a.Conn)
-	r, err := c.ListOperations(context.Background(), &longrunning.ListOperationsRequest{
-		Name:      fmt.Sprintf("%s/executions", s.a.Instance),
-		Filter:    fmt.Sprintf("toolInvocationId=%s", name),
-		PageSize:  100,
+	c := longrunning.NewOperationsClient(s.c.App().Conn)
+	r, err := c.ListOperations(context.Background(), &longrunning.ListOperationsRequest {
+		Name: fmt.Sprintf("%s/toolInvocations", s.c.App().Instance),
+		Filter: fmt.Sprintf("correlatedInvocationsId=%s", name),
+		PageSize: 100,
 		PageToken: s.pageToken,
 	})
 	if err != nil {
@@ -255,11 +239,48 @@ func (s *searchResults) fetchToolInvocationDetail() {
 	}
 	ci.n += n
 	s.updateSelectedName()
+}
 
-	// ops := Map[*longrunning.Operation, op](r.Operations, newEx)
-	// opRow.start = max(Map(ops, func (o op) { return o.start }))
-	// opRow.done = max(Map(ops, func (o op) { return o.done }))
-	// s.detailOps = r.Operations
+func (s *searchResults) fetchDetails() {
+	switch s.resource {
+	case "executions":
+		s.fetchExecutionDetail()
+	case "toolInvocations":
+		s.fetchToolInvocationDetail()
+	case "correlatedInvocations":
+		s.fetchCorrelatedInvocationsDetail()
+	}
+}
+
+func (s *searchResults) fetchToolInvocationDetail() {
+	// row is a correlatedInvocation
+	if len(s.opRows) == 0 {
+		return
+	}
+	opRow := s.opRows[s.fetchDetailsIndex]
+	name := opRow.o.name()
+	c := longrunning.NewOperationsClient(s.c.App().Conn)
+	r, err := c.ListOperations(context.Background(), &longrunning.ListOperationsRequest {
+		Name: fmt.Sprintf("%s/executions", s.c.App().Instance),
+		Filter: fmt.Sprintf("toolInvocationId=%s", name),
+		PageSize: 100,
+		PageToken: s.pageToken,
+	})
+	if err != nil {
+		panic(err)
+	}
+	s.pageToken = r.NextPageToken
+	if s.pageToken == "" {
+		s.fetchDetailsIndex++
+		if s.fetchDetailsIndex >= len(s.list.Rows) {
+			s.fetchDetailsIndex = -1
+		}
+	}
+	n := len(r.Operations)
+	ci := opRow.o.(*ci)
+	s.list.Rows = append(s.list.Rows, opRow)
+	ci.n += n
+	s.updateSelectedName()
 }
 
 func (s *searchResults) updateTitle() {
@@ -268,7 +289,7 @@ func (s *searchResults) updateTitle() {
 
 func (s *searchResults) Update() {
 	if !s.fetched {
-		s.a.Fetches++
+		s.c.App().Fetches++
 		ops := s.fetch()
 
 		for _, o := range ops {
@@ -285,7 +306,7 @@ func (s *searchResults) Update() {
 			s.opRows = append(s.opRows, &opRow{s: s, o: op, m: client.RequestMetadata(o)})
 		}
 	} else if s.fetchDetailsIndex != -1 {
-		s.a.Fetches++
+		s.c.App().Fetches++
 		s.fetchDetails()
 		s.updateTitle()
 	}
@@ -310,11 +331,11 @@ func (s *searchResults) Handle(e ui.Event) View {
 	case "<Enter>":
 		// could be nicer and just send the op
 		if s.resource == "executions" {
-			return NewDocument(s.a, s.selectedName, s)
+			return NewExecution(s.c, s.selectedName, s)
 		} else if s.resource == "toolInvocations" {
-			return NewSearchResults("executions", "toolInvocationId", s.selectedName, s.a, s)
+			return NewSearchResults("executions", "toolInvocationId", s.selectedName, s.c, s)
 		} else if s.resource == "correlatedInvocations" {
-			return NewSearchResults("toolInvocations", "correlatedInvocationsId", s.selectedName, s.a, s)
+			return NewSearchResults("toolInvocations", "correlatedInvocationsId", s.selectedName, s.c, s)
 		}
 	}
 	return s

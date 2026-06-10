@@ -1,6 +1,7 @@
 package view
 
 import (
+	// "google.golang.org/protobuf/encoding/prototext"
 	"container/list"
 	"context"
 	"fmt"
@@ -57,10 +58,9 @@ func (nv numValue) String() string {
 }
 
 type Queue struct {
-	a            *client.App
+	c            client.Component
 	focused      bool
 	s            stats
-	h            int
 	meter        *client.List
 	stats        *client.Tree
 	workers      numValue
@@ -86,19 +86,17 @@ func (s workersTitle) String() string {
 	return fmt.Sprintf(">%s< %s", workersSorts[s.q.workersSort], workersViews[s.q.workersView])
 }
 
-func NewQueue(a *client.App, selected int) *Queue {
-	_, h := ui.TerminalDimensions()
+func NewQueue(c client.Component, selected int) *Queue {
 	meter := client.NewList()
 	meter.SelectedRow = -1
 	q := &Queue{
-		a: a,
+		c: c,
 		s: stats{
 			profiles: make(map[string]*profileResult),
 			last:     time.Now(),
 			mutex:    &sync.Mutex{},
 		},
 		meter:       meter,
-		h:           h,
 		stats:       client.NewTree(),
 		workers:     numValue{fmt: "Workers: %v"},
 		prequeue:    numValue{fmt: "Prequeue: %v", mode: 1},
@@ -135,7 +133,7 @@ func getNumber(title string, v View, action func(int) bool) View {
 func (v *Queue) Handle(e ui.Event) View {
 	switch e.ID {
 	case "<Escape>", "q", "<C-c>":
-		v.a.Done = true
+		v.c.Finish()
 	case "J", "<PageDown>":
 		if v.meter.SelectedRow != -1 {
 			v.meter.ScrollAmount(v.meter.Inner.Dy())
@@ -164,7 +162,7 @@ func (v *Queue) Handle(e ui.Event) View {
 					return false
 				}
 				for _, worker := range v.s.workers {
-					w := NewWorker(v.a, worker, v)
+					w := NewWorker(v.c, worker, v)
 					w.changeWidth(int32(width))
 				}
 				return true
@@ -183,7 +181,7 @@ func (v *Queue) Handle(e ui.Event) View {
 			}
 		}
 	case "s":
-		return newSettings(v.a, v)
+		return newSettings(v.c.App(), v)
 	case "H", "<S-Left>":
 		n := v.stats.SelectedNode()
 		for _, cn := range n.Nodes {
@@ -196,7 +194,7 @@ func (v *Queue) Handle(e ui.Event) View {
 				v.stats.Expand()
 				ui.Clear()
 			}
-		} else {
+		} else if v.meter.SelectedRow == -1 && len(v.meter.Rows) > 0 {
 			v.stats.Focused = v.meter.SelectedRow != -1
 			if v.meter.SelectedRow == -1 {
 				v.meter.SelectedRow = 0
@@ -213,17 +211,19 @@ func (v *Queue) Handle(e ui.Event) View {
 	case "<Enter>":
 		if v.meter.SelectedRow >= 0 {
 			// get the worker out of the list
-			return NewWorker(v.a, v.meter.Rows[v.meter.SelectedRow].(Worker).w, v)
+			if v.meter.SelectedRow < len(v.meter.Rows) {
+				return NewWorker(v.c, v.meter.Rows[v.meter.SelectedRow].(Worker).w, v)
+			}
 		} else if v.stats.SelectedNode().Value.(*numValue).mode != 0 {
 			ui.Clear()
-			return NewOperationList(v.a, v.stats.SelectedNode().Value.(*numValue).mode, v)
+			return NewOperationList(v.c, v.stats.SelectedNode().Value.(*numValue).mode, v)
 		}
 	case "D":
-		return NewDocument(v.a, "test", v)
+		return NewExecution(v.c, "test", v)
 	case "/":
-		return NewSearch(v.a, v)
+		return NewSearch(v.c, v)
 	case "T":
-		return NewTest(v.a, v)
+		return NewTest(v.c.App(), v)
 	case "<Tab>":
 		if v.stats.SelectedRow == 0 {
 			v.workersView++
@@ -241,7 +241,7 @@ func (v *Queue) Handle(e ui.Event) View {
 		}
 		/*
 		  case "S":
-		    return NewServerTest(v.a, v)
+		    return NewServerTest(v.c.App(), v)
 		*/
 	}
 	return v
@@ -282,28 +282,41 @@ func (v *Queue) updateProvisionNodes(provisions []*bfpb.QueueStatus) {
 
 func (v *Queue) Update() {
 	s := &v.s
-	c := bfpb.NewOperationQueueClient(v.a.Conn)
+	c := bfpb.NewOperationQueueClient(v.c.App().Conn)
 	var st *bfpb.BackplaneStatus
 	if v.stats.SelectedRow == 0 {
 		if s.workers != nil {
 			var wg sync.WaitGroup
 			for _, worker := range s.workers {
 				wg.Add(1)
-				go fetchProfile(v, worker, v.a.GetWorkerConn(worker, v.a.CA), &wg)
+				go fetchProfile(v, worker, v.c.App().GetWorkerConn(worker, v.c.App().CA), &wg)
 			}
 			wg.Wait()
 		}
 	}
 	start := time.Now()
-	st, err := c.Status(context.Background(), &bfpb.BackplaneStatusRequest{
+	st, err := c.Status(context.Background(), &bfpb.BackplaneStatusRequest {
 		InstanceName: "shard",
 	})
-	v.a.LastReapiLatency = time.Since(start)
+	v.c.App().LastReapiLatency = time.Since(start)
 	if err == nil {
 		s.status = *st
-		s.workers = st.ActiveExecuteWorkers
+		s.workers = st.ActiveExecuteWorkers;
+		// delete all members of s.profiles that aren't in s.workers
+		activeWorkers := map[string]bool{}
+		for _, worker := range s.workers {
+			activeWorkers[worker] = true
+		}
+		inactiveWorkers := []string{}
+		for name := range s.profiles {
+			if !activeWorkers[name] {
+				inactiveWorkers = append(inactiveWorkers, name)
+		  }
+		}
+		for _, name := range inactiveWorkers {
+			delete(s.profiles, name)
+	  }
 	} else {
-		panic(err)
 		st, ok := status.FromError(err)
 		if !ok || (st.Code() != codes.Unknown && st.Code() != codes.Unavailable) {
 			panic(err)
@@ -326,9 +339,9 @@ func (v *Queue) Update() {
 			s.queueData.PushFront(s.queueSum / s.ticks)
 			s.dispatchedData.PushFront(s.dispatchedSum / s.ticks)
 		} else {
-			s.prequeueData.PushFront(float64(0))
-			s.queueData.PushFront(float64(0))
-			s.dispatchedData.PushFront(float64(0))
+			s.prequeueData.PushFront(float64(0));
+			s.queueData.PushFront(float64(0));
+			s.dispatchedData.PushFront(float64(0));
 		}
 		s.prequeueSum = 0
 		s.queueSum = 0
@@ -381,7 +394,7 @@ func treeDimensions(t *client.Tree) dims {
 func (v Queue) Render() []ui.Drawable {
 	s := v.s
 	p := widgets.NewParagraph()
-	p.Text = fmt.Sprintf("%v: %v\n%v: %v\n%v", v.a.RedisHost, v.a.LastRedisLatency, v.a.ReapiHost, v.a.LastReapiLatency, formatTime(s.last))
+	p.Text = fmt.Sprintf("%v: %v\n%v: %v\n%v", v.c.App().RedisHost, v.c.App().LastRedisLatency, v.c.App().ReapiHost, v.c.App().LastReapiLatency, formatTime(s.last))
 	p.SetRect(0, 0, 80, 5)
 
 	d := treeDimensions(v.stats)
@@ -391,7 +404,7 @@ func (v Queue) Render() []ui.Drawable {
 
 	var info ui.Drawable
 	if v.stats.SelectedRow == 0 {
-		info = renderWorkersInfo(&s, v.meter, d.width, v.h, v.workersSort, v.workersView)
+		info = renderWorkersInfo(&s, v.meter, d.width, v.c.Dimensions().Height, v.workersSort, v.workersView)
 	} else {
 		plot := widgets.NewPlot()
 		plot.Data = make([][]float64, 1)
@@ -623,7 +636,7 @@ func renderWorkerRow(r *profileResult, wl int, view int) Worker {
 				execute_action_used = int(stage.SlotsUsed)
 				execute_action_slots = int(stage.SlotsConfigured)
 			} else {
-				execute_action_used = len(stage.OperationNames)
+				execute_action_used = len(stage.OperationNames) + len(stage.Executions)
 				execute_action_slots = 0
 			}
 		} else if stage.Name == "ReportResultStage" {
@@ -683,6 +696,9 @@ func renderWorkerRow(r *profileResult, wl int, view int) Worker {
 	}
 	row += ")["
 	row += strings.Repeat("#", report_result_used)
+	if report_result_slots < report_result_used {
+		panic(fmt.Sprintf("HOW?? %d %d", report_result_slots, report_result_used))
+	}
 	row += strings.Repeat(" ", report_result_slots-report_result_used) + "]("
 	if report_result_used == report_result_slots {
 		row += "fg:black,mod:dim,bg:green"

@@ -44,7 +44,6 @@ func NewApp(redisHost string, reapiHost string, ca string) *App {
 		RedisHost:   redisHost,
 		ReapiHost:   reapiHost,
 		CA:          ca,
-		Done:        false,
 		Ops:         make(map[string]*longrunning.Operation),
 		Actions:     make(map[string]*reapi.Action),
 		Metadatas:   make(map[string]*reapi.RequestMetadata),

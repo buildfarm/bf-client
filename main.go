@@ -16,35 +16,94 @@ import (
 	tm "github.com/nsf/termbox-go"
 )
 
-type component interface {
-	open()
-	close()
-	handle(ui.Event)
-	update() component
-	render()
-	done() bool
-}
-
 type baseComponent struct {
 	a *client.App
 	v view.View
+	dimensions ui.Resize
+	done bool
 }
 
-func (c *baseComponent) open() {
+func (c *baseComponent) Open(args []string) {
+	if err := ui.Init(); err != nil {
+		log.Fatalf("failed to initialize termui: %v", err)
+	}
+	tm.SetInputMode(tm.InputEsc)
+
+	redisHost, reapiHost := args[1], args[2]
+
+	var ca string
+	if len(args) > 3 {
+		ca = args[3]
+	}
+
+	if !strings.Contains(redisHost, ":") {
+		redisHost += ":6379"
+	}
+
+	c.a = client.NewApp(redisHost, reapiHost, ca)
+	c.v = view.NewQueue(c, 3)
+
 	c.a.Connect()
 }
 
-func (c *baseComponent) close() {
+func (c *baseComponent) Close() {
+	ui.Close()
+
 	c.a.Conn.Close()
 }
 
+func (c *baseComponent) Run() client.Component {
+	w, h := ui.TerminalDimensions()
+	c.dimensions = ui.Resize {
+		Width: w,
+		Height: h,
+	}
+	uiEvents := ui.PollEvents()
+	lastFrameLimit := c.a.FrameLimit
+	ticker := time.NewTicker(time.Second / time.Duration(c.a.FrameLimit)).C
+	for !c.done {
+		select {
+		case e := <-uiEvents:
+			c.handle(e)
+			if lastFrameLimit != c.a.FrameLimit {
+				ticker = time.NewTicker(time.Second / time.Duration(c.a.FrameLimit)).C
+				lastFrameLimit = c.a.FrameLimit
+			}
+		case <-ticker:
+			if c.a.UpdateCountdown == 0 {
+				c.a.UpdateCountdown = c.a.SkipFrames
+				c.a.Fetches = 0
+				c.update()
+			} else {
+				c.a.UpdateCountdown--
+			}
+			c.render()
+		}
+	}
+	return nil
+}
+
+func (c *baseComponent) App() *client.App {
+	return c.a
+}
+
+func (c *baseComponent) Finish() {
+	c.done = true
+}
+
+func (c *baseComponent) Dimensions() ui.Resize {
+	return c.dimensions
+}
+
 func (c *baseComponent) handle(e ui.Event) {
+	if e.ID == "<Resize>" {
+		c.dimensions = e.Payload.(ui.Resize)
+	}
 	c.v = c.v.Handle(e)
 }
 
-func (c *baseComponent) update() component {
+func (c *baseComponent) update() {
 	c.v.Update()
-	return c
 }
 
 func (c baseComponent) render() {
@@ -57,58 +116,18 @@ func (c baseComponent) render() {
 	ui.Render(append(w, f)...)
 }
 
-func (c baseComponent) done() bool {
-	return c.a.Done
-}
-
 func main() {
-	if err := ui.Init(); err != nil {
-		log.Fatalf("failed to initialize termui: %v", err)
-	}
-	tm.SetInputMode(tm.InputEsc)
-	defer ui.Close()
-
-	redisHost, reapiHost := os.Args[1], os.Args[2]
-
-	var ca string
-	if len(os.Args) > 3 {
-		ca = os.Args[3]
-	}
-
-	if !strings.Contains(redisHost, ":") {
-		redisHost += ":6379"
-	}
-
-	a := client.NewApp(redisHost, reapiHost, ca)
-	var c component = &baseComponent{
-		a: a,
-		v: view.NewQueue(a, 3),
-	}
-
-	c.open()
-
-	uiEvents := ui.PollEvents()
-	lastFrameLimit := a.FrameLimit
-	ticker := time.NewTicker(time.Second / time.Duration(a.FrameLimit)).C
-	for !c.done() {
-		select {
-		case e := <-uiEvents:
-			c.handle(e)
-			if lastFrameLimit != a.FrameLimit {
-				ticker = time.NewTicker(time.Second / time.Duration(a.FrameLimit)).C
-				lastFrameLimit = a.FrameLimit
-			}
-		case <-ticker:
-			if a.UpdateCountdown == 0 {
-				a.UpdateCountdown = a.SkipFrames
-				a.Fetches = 0
-				c = c.update()
-			} else {
-				a.UpdateCountdown--
-			}
-			c.render()
+	var c client.Component
+	c = &baseComponent {}
+	var nc client.Component = nil
+	for c != nil {
+		if nc != c {
+			c.Open(os.Args)
 		}
+		nc = c.Run()
+		if nc != c {
+			c.Close()
+		}
+		c = nc
 	}
-
-	c.close()
 }

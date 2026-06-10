@@ -6,6 +6,7 @@ go_library(
         "app.go",
         "bytestream.go",
         "cas.go",
+        "component.go",
         "digest.go",
         "document.go",
         "hasher.go",

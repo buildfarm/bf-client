@@ -43,6 +43,7 @@ use_repo(
     "org_golang_google_genproto_googleapis_bytestream",
     "org_golang_google_genproto_googleapis_rpc",
     "org_golang_google_grpc",
+    "org_golang_google_protobuf",
     "org_golang_x_net",
 )
 go_deps.module_override(

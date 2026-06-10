@@ -27,7 +27,7 @@ type filter interface {
 }
 
 type worker struct {
-	a       *client.App
+	c       client.Component
 	v       View
 	w       string
 	profile *bfpb.WorkerProfileMessage
@@ -54,7 +54,7 @@ func NewStageList() *client.List {
 	return list
 }
 
-func NewWorker(a *client.App, w string, v View) *worker {
+func NewWorker(c client.Component, w string, v View) *worker {
 	title := widgets.NewParagraph()
 	match := NewStageList()
 	inputFetch := NewStageList()
@@ -62,7 +62,7 @@ func NewWorker(a *client.App, w string, v View) *worker {
 	reportResult := NewStageList()
 	execute.SelectedRow = 0
 	return &worker{
-		a:            a,
+		c:            c,
 		v:            v,
 		w:            w,
 		title:        title,
@@ -88,7 +88,7 @@ func (v *worker) currentOperationName() string {
 func (v *worker) cancelOperation() {
 	name := v.currentOperationName()
 	if len(name) != 0 {
-		ops := longrunning.NewOperationsClient(v.a.Conn)
+		ops := longrunning.NewOperationsClient(v.c.App().Conn)
 		_, err := ops.CancelOperation(context.Background(), &longrunning.CancelOperationRequest{
 			Name: name,
 		})
@@ -149,7 +149,7 @@ func (v *worker) selectedStage() (string, bool) {
 }
 
 func (v *worker) togglePause() {
-	conn := v.a.GetWorkerConn(v.w, v.a.CA)
+	conn := v.c.App().GetWorkerConn(v.w, v.c.App().CA)
 	c := bfpb.NewWorkerControlClient(conn)
 	stage, paused := v.selectedStage()
 	paused = !paused
@@ -183,7 +183,7 @@ func (v *worker) decreaseWidth() {
 }
 
 func (v *worker) changeWidth(width int32) {
-	conn := v.a.GetWorkerConn(v.w, v.a.CA)
+	conn := v.c.App().GetWorkerConn(v.w, v.c.App().CA)
 	c := bfpb.NewWorkerControlClient(conn)
 	stage, paused := v.selectedStage()
 	r, err := c.PipelineChange(context.Background(), &bfpb.WorkerPipelineChangeRequest{
@@ -224,7 +224,7 @@ func (v *worker) Handle(e ui.Event) View {
 	case "X":
 		v.cancelOperation()
 	case "<Enter>":
-		return NewDocument(v.a, v.currentOperationName(), v)
+		return NewExecution(v.c, v.currentOperationName(), v)
 	case "j", "<Down>":
 		v.selectedList().ScrollDown()
 	case "k", "<Up>":
@@ -273,6 +273,7 @@ type stageEx struct {
 	build    string
 	done     bool
 	action  *reapi.Action
+	resources []*bfpb.Resource
 }
 
 func (e stageEx) label() string {
@@ -294,8 +295,8 @@ func reasonableDuration(d time.Duration) time.Duration {
 	return d.Truncate(1 * time.Millisecond)
 }
 
-func gpu(a *reapi.Action) string {
-	if (a == nil) {
+func commandResources(a *reapi.Action) string {
+	if (a == nil || a.Platform == nil || a.Platform.Properties == nil) {
 		return ""
 	}
 	for _, property := range a.Platform.Properties {
@@ -318,7 +319,12 @@ func (e stageEx) String() string {
 			end = e.final
 		}
 		label += " " + reasonableDuration(end.Sub(e.fence)).String()
-		label += gpu(e.action)
+		label += commandResources(e.action)
+		for _, resource := range e.resources {
+			if resource.Name == "cpu.shares" {
+				label += fmt.Sprintf(" %d shares", resource.Amount)
+			}
+		}
 	}
 	if e.stalled {
 		label = fmt.Sprintf("[%s](fg:black,bg:blue)", label)
@@ -398,20 +404,20 @@ func (v *worker) filter(ex *stageEx) bool {
 	return true
 }
 
-func (v *worker) populateExecutions(l *client.List, stage string, r []string) {
-	r = filterEmpty(r)
-	// rows := make([]fmt.Stringer, len(r))
+func (v *worker) populateExecutions(l *client.List, stage string, r []*bfpb.WorkerExecution) {
+	// r = filterEmpty(r)
 	rows := []fmt.Stringer{}
-	for _, name := range r {
-		ex := &stageEx{field: func() int { return v.field }, name: name}
-		op, ok := v.a.Ops[name]
+	for _, execution := range r {
+		name := execution.Name
+		ex := &stageEx{field: func() int { return v.field }, name: name, resources: execution.Resources}
+		op, ok := v.c.App().Ops[name]
 		if ok {
 			em, err := client.ExecuteOperationMetadata(op)
 			if err != nil {
 				continue
 			}
-	    actionDigest := renderDigest(*em.ActionDigest, em.DigestFunction)
-			a, action_ok := v.a.Actions[actionDigest]
+			actionDigest := renderDigest(*em.ActionDigest, em.DigestFunction)
+			a, action_ok := v.c.App().Actions[actionDigest]
 			if !action_ok {
 				continue
 			}
@@ -425,8 +431,10 @@ func (v *worker) populateExecutions(l *client.List, stage string, r []string) {
 				ex.stalled, ex.fence = stalled, fence
 			}
 			m := client.RequestMetadata(op)
-			if m == nil {
-				panic(op)
+			if m != nil {
+				ex.target = m.TargetId
+				ex.mnemonic = m.ActionMnemonic
+				ex.build = m.CorrelatedInvocationsId
 			}
 			ex.target = m.TargetId
 			ex.mnemonic = m.ActionMnemonic
@@ -527,12 +535,19 @@ func getAction(a *client.App, em *reapi.ExecuteOperationMetadata, conn *grpc.Cli
 	}
 }
 
+func pct(n int64, d int64) int {
+	if n == 0 {
+		return 0
+	}
+	return int(n * 100 / d)
+}
+
 func (v worker) Render() []ui.Drawable {
 	v.title.Text = fmt.Sprintf(
 		"%s CAS Count: %d Size: %s (%d%%) Unref: %d%%",
 		v.w, v.profile.CasEntryCount, humanize.Bytes(uint64(v.profile.CasSize)),
-		int((float64(v.profile.CasSize)/float64(v.profile.CasMaxSize))*100),
-		int((float64(v.profile.CasUnreferencedEntryCount)/float64(v.profile.CasEntryCount))*100))
+		pct(v.profile.CasSize, v.profile.CasMaxSize),
+		pct(v.profile.CasUnreferencedEntryCount, v.profile.CasEntryCount))
 	v.title.Border = false
 	v.title.SetRect(0, -1, 80, 2)
 	v.match.Title = selectedTitle(v.match.SelectedRow != -1, "Match")
@@ -543,10 +558,20 @@ func (v worker) Render() []ui.Drawable {
 
 	now := time.Now()
 
-	v.a.Fetches = 0
+	a := v.c.App()
+	a.Fetches = 0
 
-	fetches := make([]string, 0)
+	fetches := []string{}
 	for _, stage := range v.profile.Stages {
+		if len(stage.Executions) == 0 {
+			for _, name := range stage.OperationNames {
+				stage.Executions = append(stage.Executions, &bfpb.WorkerExecution{Name: name})
+			}
+		} else {
+			for _, execution := range stage.Executions {
+				stage.OperationNames = append(stage.OperationNames, execution.Name)
+			}
+		}
 		// for all operations in stages
 		for _, name := range stage.OperationNames {
 			// if operation not in cache, fetch it
@@ -554,7 +579,7 @@ func (v worker) Render() []ui.Drawable {
 			if name == "" {
 				continue
 			}
-			if op, ok := v.a.Ops[name]; ok && op != nil {
+			if op, ok := a.Ops[name]; ok && op != nil {
 				match, err := opMatchesStage(op, stage)
 				if err != nil {
 					panic(err)
@@ -578,7 +603,7 @@ func (v worker) Render() []ui.Drawable {
 				// if stage is not the operation current stage, fetch it
 			}
 			if fetch {
-				v.a.Fetches++
+				a.Fetches++
 				v.fetches[name] = now
 				fetches = append(fetches, name)
 			}
@@ -586,26 +611,29 @@ func (v worker) Render() []ui.Drawable {
 		wg := sync.WaitGroup{}
 		wg.Add(len(fetches))
 		for _, name := range fetches {
-			go getExecution(v.a, name, v.a.Conn, &wg)
+			go getExecution(a, name, a.Conn, &wg)
 		}
 		wg.Wait() // really needs to move to Update
 
 		wg = sync.WaitGroup{}
 		for _, name := range fetches {
-			em, err := client.ExecuteOperationMetadata(v.a.Ops[name])
-			if err == nil {
-				wg.Add(1)
-				go getAction(v.a, em, v.a.Conn, &wg)
+			op, ok := a.Ops[name]
+			if ok {
+				em, err := client.ExecuteOperationMetadata(op)
+				if err == nil {
+					wg.Add(1)
+					go getAction(a, em, a.Conn, &wg)
+				}
 			}
 		}
 		wg.Wait()
 
 		switch stage.Name {
 		case "MatchStage":
-			v.populateExecutions(v.match, stage.Name, stage.OperationNames)
+			v.populateExecutions(v.match, stage.Name, stage.Executions)
 		case "InputFetchStage":
 			v.inputFetch.Title = fmt.Sprintf(selectedTitle(v.inputFetch.SelectedRow != -1, "InputFetch")+" %d/%d", stage.SlotsUsed, stage.SlotsConfigured)
-			v.populateExecutions(v.inputFetch, stage.Name, stage.OperationNames)
+			v.populateExecutions(v.inputFetch, stage.Name, stage.Executions)
 		case "ExecuteActionStage":
 			executions := len(stage.OperationNames)
 			avg_slots_per_execution := float32(0)
@@ -614,10 +642,10 @@ func (v worker) Render() []ui.Drawable {
 			}
 			v.execute.Title = fmt.Sprintf(selectedTitle(v.execute.SelectedRow != -1, "Execute")+" %d/%d (%d) Avg %g", stage.SlotsUsed, stage.SlotsConfigured, executions, avg_slots_per_execution)
 			// TODO get some time spent doing this
-			v.populateExecutions(v.execute, stage.Name, stage.OperationNames)
+			v.populateExecutions(v.execute, stage.Name, stage.Executions)
 		case "ReportResultStage":
 			v.reportResult.Title = fmt.Sprintf(selectedTitle(v.reportResult.SelectedRow != -1, "Report Result")+" %d/%d", stage.SlotsUsed, stage.SlotsConfigured)
-			v.populateExecutions(v.reportResult, stage.Name, stage.OperationNames)
+			v.populateExecutions(v.reportResult, stage.Name, stage.Executions)
 		}
 	}
 
@@ -629,7 +657,7 @@ func (v worker) Render() []ui.Drawable {
 	v.inputFetch.SetRect(0, row, 80, row+2+inputFetchHeight)
 	row += 2 + inputFetchHeight
 	// executeRows := len(v.execute.Rows)
-	executeHeight := 7
+	executeHeight := 20
 	v.execute.SetRect(0, row, 80, row+2+executeHeight)
 	row += 2 + executeHeight
 	// reportResultRows := len(v.reportResult.Rows)
@@ -648,7 +676,8 @@ func pausedStyle(p bool) ui.Style {
 }
 
 func (v *worker) Update() {
-	conn := v.a.GetWorkerConn(v.w, v.a.CA)
+	a := v.c.App()
+	conn := a.GetWorkerConn(v.w, a.CA)
 	workerProfile := bfpb.NewWorkerProfileClient(conn)
 	profile, err := workerProfile.GetWorkerProfile(context.Background(), &bfpb.WorkerProfileRequest{})
 	if err == nil {
@@ -657,6 +686,10 @@ func (v *worker) Update() {
 	c := bfpb.NewWorkerControlClient(conn)
 	r, err := c.PipelineChange(context.Background(), &bfpb.WorkerPipelineChangeRequest{})
 	if err != nil {
+		st, ok := status.FromError(err)
+		if ok || st.Code() == codes.Unavailable {
+			return
+		}
 		panic(err)
 	}
 	for _, change := range r.Changes {

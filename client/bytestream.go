@@ -9,6 +9,32 @@ import (
 	"io"
 )
 
+func ReadBlob(c *grpc.ClientConn, i string, d bfpb.Digest) ([]byte, error) {
+	bs := bytestream.NewByteStreamClient(c)
+
+	bsrc, err := bs.Read(context.Background(), &bytestream.ReadRequest{
+		ResourceName: i + "/blobs/" + DigestString(d),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	for {
+		var br *bytestream.ReadResponse
+		br, err = bsrc.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if int64(len(br.Data)) == d.Size {
+			return br.Data, nil
+		}
+	}
+	return nil, err
+}
+
 func Expect(c *grpc.ClientConn, d bfpb.Digest, m proto.Message) error {
 	bs := bytestream.NewByteStreamClient(c)
 

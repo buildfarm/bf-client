@@ -47,7 +47,7 @@ func (d *dropdown) value() string {
 }
 
 type search struct {
-	a        *client.App
+	c        client.Component
 	v        View
 	i        int
 	resource *dropdown
@@ -73,7 +73,7 @@ func makeStringers(values []string) []fmt.Stringer {
 	return stringers
 }
 
-func NewSearch(a *client.App, v View) View {
+func NewSearch(c client.Component, v View) View {
 	resource := newDropdown(makeStringers([]string{"executions", "toolInvocations", "correlatedInvocations"}))
 	resource.SetRect(20, 15, 40, 18)
 	resource.Border = false
@@ -84,7 +84,7 @@ func NewSearch(a *client.App, v View) View {
 	text.Text = "_"
 	text.SetRect(filter.Max.X+1, filter.Min.Y, filter.Max.X+40, filter.Max.Y)
 	return &search{
-		a:        a,
+		c:        c,
 		v:        v,
 		i:        0,
 		resource: resource,
@@ -155,13 +155,13 @@ func (s *search) Handle(e ui.Event) View {
 			text := s.text.Text[:len(s.text.Text)-1]
 			if s.resource.value() == "executions" {
 				if s.filter.value() == "name" {
-					return NewDocument(s.a, s.a.Instance+"/executions/"+text, s.v)
+					return NewExecution(s.c, s.c.App().Instance+"/executions/"+text, s.v)
 				}
-				olv := NewOperationList(s.a, 4, s.v)
+				olv := NewOperationList(s.c, 4, s.v)
 				olv.Filter = fmt.Sprintf("%s=%s", s.filter.value(), text)
 				return olv
 			}
-			return NewSearchResults(s.resource.value(), s.filter.value(), text, s.a, s.v)
+			return NewSearchResults(s.resource.value(), s.filter.value(), text, s.c, s.v)
 		}
 	case "q":
 		if s.i != 0 {

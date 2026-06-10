@@ -12,10 +12,13 @@ import (
 	"sort"
 )
 
+type nodeAction func (d bfpb.Digest, s string) View
+
 type nodeValue struct {
 	name   string
 	size   int
-	digest string
+	digest bfpb.Digest
+	action nodeAction
 }
 
 func (nv nodeValue) String() string {
@@ -23,7 +26,7 @@ func (nv nodeValue) String() string {
 		return nv.name
 	}
 	// maybe have N / size if opened
-	return fmt.Sprintf("%s (%d) %s", nv.name, nv.size, nv.digest)
+	return fmt.Sprintf("%s (%d) %s", nv.name, nv.size, client.DigestString(nv.digest))
 }
 
 type inputView struct {
@@ -44,6 +47,10 @@ func NewInput(a *client.App, d bfpb.Digest, v View) View {
 	}
 }
 
+func (i *inputView) onFile(d bfpb.Digest, s string) View {
+	return NewFile(i.a, d, s, i)
+}
+
 func (v *inputView) Update() {
 	if v.i != nil {
 		v.t.Title = "Directory: " + client.DigestString(v.d) + fmt.Sprintf(" (%d/%d)", v.t.SelectedRow, v.t.Size())
@@ -60,7 +67,7 @@ func (v *inputView) Update() {
 	t.SelectedRowStyle = ui.NewStyle(ui.ColorBlack, ui.ColorWhite)
 	root := client.DigestString(v.d)
 	sizes := make(map[string]int)
-	v.nodes = createInputNodes(v.i[root], root, v.d.DigestFunction, v.i, sizes)
+	v.nodes = createInputNodes(v.i[root], root, v.d.DigestFunction, v.i, sizes, v.onFile)
 	t.SetNodes(v.nodes)
 	// setting this on every frame seems to jank it up
 	w, h := ui.TerminalDimensions()
@@ -99,7 +106,12 @@ func (v *inputView) Handle(e ui.Event) View {
 		// hack to get prepareNodes
 		v.t.Collapse()
 	case "<Enter>":
-		v.t.ToggleExpand()
+		n := v.t.SelectedNode().Value.(*nodeValue)
+		if n.action != nil {
+			return n.action(n.digest, n.name)
+		} else {
+			v.t.ToggleExpand()
+		}
 	case "E":
 		v.t.ExpandAll()
 	case "C":
@@ -178,15 +190,16 @@ func (s *weightSorter) Less(i, j int) bool {
 	return !s.by(s.nodes[i], s.nodes[j])
 }
 
-func createInputNodes(d *reapi.Directory, dd string, df reapi.DigestFunction_Value, i map[string]*reapi.Directory, sizes map[string]int) []*client.TreeNode {
+func createInputNodes(d *reapi.Directory, dd string, df reapi.DigestFunction_Value, i map[string]*reapi.Directory, sizes map[string]int, fa nodeAction) []*client.TreeNode {
 	nodes := []*client.TreeNode{}
 	size := 0
 	for _, n := range d.Directories {
-		child := client.DigestString(client.ToDigest(*n.Digest, df))
-		childNodes := createInputNodes(i[child], child, df, i, sizes)
+		digest := client.ToDigest(*n.Digest, df)
+		child := client.DigestString(digest)
+		childNodes := createInputNodes(i[child], child, df, i, sizes, fa)
 		childSize := sizes[child]
 		nodes = append(nodes, &client.TreeNode{
-			Value: &nodeValue{name: n.Name, size: childSize, digest: child},
+			Value: &nodeValue{name: n.Name, size: childSize, digest: digest},
 			Nodes: childNodes,
 		})
 		size += childSize
@@ -194,7 +207,7 @@ func createInputNodes(d *reapi.Directory, dd string, df reapi.DigestFunction_Val
 	size += len(d.Files)
 	for _, n := range d.Files {
 		nodes = append(nodes, &client.TreeNode{
-			Value: &nodeValue{name: n.Name, digest: client.DigestString(client.ToDigest(*n.Digest, df))},
+			Value: &nodeValue{name: n.Name, digest: client.ToDigest(*n.Digest, df), action: fa},
 		})
 	}
 	sizes[dd] = size
