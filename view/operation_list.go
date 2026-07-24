@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,6 +33,7 @@ type operation struct {
 type operationList struct {
 	list       *client.List
 	Filter     string
+	fieldFilter string
 	Select     map[string]string
 	Name       string
 	c          client.Component
@@ -281,6 +283,11 @@ func selectField(field int, name string) map[string]string {
 	return map[string]string{key: name}
 }
 
+func (v *operationList) setFieldFilter(filter string) bool {
+	v.fieldFilter = filter
+	return true
+}
+
 func (v *operationList) Handle(e ui.Event) View {
 	switch e.ID {
 	case "<Escape>", "q", "<C-c>":
@@ -301,6 +308,8 @@ func (v *operationList) Handle(e ui.Event) View {
 	case "l", "<Right>":
 		v.field++
 		v.field %= 4
+	case "/":
+		return NewTextEntry("filter field", v.setFieldFilter, UISize(), v)
 	case "<Enter>":
 		ui.Clear()
 		if v.grouped {
@@ -465,7 +474,15 @@ func (v operationList) renderItemized() []fmt.Stringer {
 		if !ok {
 			o = nil
 		}
-		rows = append(rows, opStringer(name, o, func() int { return v.field }))
+		row := opStringer(name, o, func() int { return v.field })
+		if v.fieldFilter != "" {
+			if !strings.Contains(row.label(), v.fieldFilter) {
+				row = nil
+			}
+		}
+		if row != nil {
+			rows = append(rows, row)
+		}
 	}
 	return rows
 }

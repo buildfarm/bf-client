@@ -19,6 +19,7 @@ type List struct {
 	WrapText         bool
 	TextStyle        ui.Style
 	SelectedRow      int
+	Focused          bool
 	topRow           int
 	SelectedRowStyle ui.Style
 	SubTitle         fmt.Stringer
@@ -39,6 +40,7 @@ func NewList() *List {
 		SelectedRowStyle: ui.Theme.List.Text,
 		SubTitle:         &emptyStringer{},
 		SubTitleStyle:    ui.Theme.List.Text,
+		Focused:          true,
 	}
 }
 
@@ -74,8 +76,9 @@ func (self *List) Draw(buf *ui.Buffer) {
 			cells = ui.WrapCells(cells, uint(self.Inner.Dx()))
 		}
 		for j := 0; j < len(cells) && point.Y < self.Inner.Max.Y; j++ {
+			selected := self.Focused && row == self.SelectedRow
 			style := cells[j].Style
-			if row == self.SelectedRow {
+			if selected {
 				style = self.SelectedRowStyle
 			}
 			if cells[j].Rune == '\n' {

@@ -16,6 +16,7 @@ type actionView struct {
 	a          *client.App
 	d          bfpb.Digest
 	action     *reapi.Action
+	il         map[string]bool
 	err        error
 	v          View
 	doc        *client.Document
@@ -27,20 +28,23 @@ type actionView struct {
 	focusAnchor int
 }
 
-func NewAction(a *client.App, d bfpb.Digest, v View) View {
+func NewAction(a *client.App, d bfpb.Digest, il map[string]bool, v View) View {
 	doc := client.NewDocument()
 	content := `
   <html>
     <head>
-      <title></title>
+      <title>%[1]s</title>
     </head>
     <body>
       <div id="action"></div>
+      <div>
+	<a href="edit:%[1]s">Edit</a>
+      </div>
     </body>
   </html>`
-	root, err := html.Parse(strings.NewReader(content))
+	ds := client.DigestString(d)
+	root, err := html.Parse(strings.NewReader(fmt.Sprintf(content, ds)))
 	doc.SetRoot(root)
-	client.DocumentSetText(doc.Find("title"), client.DigestString(d))
 	actionNode := doc.Find("#action")
 	if err != nil {
 		panic(err)
@@ -62,6 +66,7 @@ func NewAction(a *client.App, d bfpb.Digest, v View) View {
 		doc:         doc,
 		anchors:     anchors,
 		focusAnchor: focusAnchor,
+		il:           il,
 	}
 }
 
@@ -73,10 +78,11 @@ func (v *actionView) link(target string) View {
 	case "command":
 		return NewCommand(v.a, client.ParseDigest(id), v)
 	case "input":
-		return NewInput(v.a, client.ParseDigest(id), v)
+		return NewInput(v.a, client.ParseDigest(id), v.il, v)
 	}
 	return v
 }
+
 func (v *actionView) Handle(e ui.Event) View {
 	switch e.ID {
 	case "<Tab>", "j", "<Down>":
@@ -133,7 +139,7 @@ func (v *actionView) Update() {
 		}
 		inputRoot := reDigestString(*a.InputRootDigest, v.d.DigestFunction)
 		content = fmt.Sprintf(content, command, inputRoot)
-		if len(a.Platform.Properties) > 0 {
+		if a.Platform != nil && len(a.Platform.Properties) > 0 {
 			content += "<h2>Platform:</h2><ul>"
 			for _, property := range a.Platform.Properties {
 				content += fmt.Sprintf("<li>%s: %s</li>", property.Name, property.Value)

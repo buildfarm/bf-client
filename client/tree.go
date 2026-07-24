@@ -1,7 +1,6 @@
 package client
 
 import (
-	"fmt"
 	"image"
 	"strings"
 
@@ -11,9 +10,13 @@ import (
 
 const treeIndent = "  "
 
+type SelectableStringer interface {
+	String(selected bool) string
+}
+
 // TreeNode is a tree node.
 type TreeNode struct {
-	Value    fmt.Stringer
+	Value    SelectableStringer
 	Expanded bool
 	Nodes    []*TreeNode
 
@@ -26,7 +29,7 @@ type TreeNode struct {
 // To prevent steps down the tree, return <= 0
 type TreeWalkFn func(*TreeNode) int
 
-func (self *TreeNode) parseStyles(style ui.Style) []ui.Cell {
+func (self *TreeNode) parseStyles(style ui.Style, selected bool) []ui.Cell {
 	var sb strings.Builder
 	if len(self.Nodes) == 0 {
 		sb.WriteString(strings.Repeat(treeIndent, self.level+1))
@@ -39,7 +42,7 @@ func (self *TreeNode) parseStyles(style ui.Style) []ui.Cell {
 		}
 		sb.WriteByte(' ')
 	}
-	sb.WriteString(self.Value.String())
+	sb.WriteString(self.Value.String(selected))
 	return ui.ParseStyles(sb.String(), style)
 }
 
@@ -127,15 +130,17 @@ func (self *Tree) Draw(buf *ui.Buffer) {
 
 	// draw rows
 	for row := self.topRow; row < len(self.rows) && point.Y < self.Inner.Max.Y; row++ {
-		cells := self.rows[row].parseStyles(self.TextStyle)
+		selected := self.Focused && row == self.SelectedRow
+		style := self.TextStyle
+		if selected {
+			style = self.SelectedRowStyle
+		}
+		cells := self.rows[row].parseStyles(style, selected)
 		if self.WrapText {
 			cells = ui.WrapCells(cells, uint(self.Inner.Dx()))
 		}
 		for j := 0; j < len(cells) && point.Y < self.Inner.Max.Y; j++ {
 			style := cells[j].Style
-			if self.Focused && row == self.SelectedRow {
-				style = self.SelectedRowStyle
-			}
 			if point.X+1 == self.Inner.Max.X+1 && len(cells) > self.Inner.Dx() {
 				buf.SetCell(ui.NewCell(ui.ELLIPSES, style), point.Add(image.Pt(-1, 0)))
 			} else {

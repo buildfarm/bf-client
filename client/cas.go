@@ -33,6 +33,9 @@ func FetchTree(d bfpb.Digest, i map[string]*reapi.Directory, c *grpc.ClientConn)
 			if err == io.EOF {
 				break
 			}
+			if err != nil {
+				panic(err)
+			}
 			for _, dir := range gtr.Directories {
 				// compute digest of directory
 				dirDigest, err := DigestFromMessage(dir, hashFn)

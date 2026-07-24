@@ -209,6 +209,7 @@ func (n node) appendNode(c node) node {
 	for last = c.node; last.NextSibling != nil; last = last.NextSibling {
 	}
 	n.node.LastChild = last
+	c.node.Parent = n.node
 	return n
 }
 
@@ -545,29 +546,84 @@ func focus(n *html.Node) {
 	assign(n, "pseudo-class", "focus-visible", "true")
 }
 
+func (d *execution) executedMetadata() *reapi.ExecutedActionMetadata {
+	switch r := d.op.Result.(type) {
+	case *longrunning.Operation_Error:
+		return nil
+	case *longrunning.Operation_Response:
+		er := &reapi.ExecuteResponse{}
+		if ptypes.Is(r.Response, er) {
+			if err := ptypes.UnmarshalAny(r.Response, er); err != nil {
+				panic(err)
+			}
+		}
+		if ar := er.Result; ar != nil {
+			return ar.ExecutionMetadata
+		}
+	}
+	// maybe fallthrough
+	em, err := client.ExecuteOperationMetadata(d.op)
+	if err != nil {
+		return nil
+	}
+	return em.PartialExecutionMetadata
+}
+
+func (d *execution) workerExecutedMetadata() []*bfpb.WorkerExecutedMetadata {
+	wems := []*bfpb.WorkerExecutedMetadata{}
+	for _, a := range d.executedMetadata().AuxiliaryMetadata {
+		wem := &bfpb.WorkerExecutedMetadata{}
+		if a.MessageIs(wem) {
+			if err := ptypes.UnmarshalAny(a, wem); err == nil {
+				wems = append(wems, wem)
+			}
+		}
+	}
+	return wems
+}
+
+func (d *execution) inputLinks() map[string]bool {
+	il := map[string]bool{}
+	for _, wem := range d.workerExecutedMetadata() {
+		for _, p := range wem.LinkedInputDirectories {
+			il[p + "/"] = true
+		}
+	}
+	return il
+}
+
 func (d *execution) link(target string, inner string) View {
-	c := strings.SplitN(target, ":", 2)
-	view, id := c[0], c[1]
+	tc := strings.SplitN(target, ":", 2)
+	view, id := tc[0], tc[1]
+	if view == "action" {
+		return NewAction(d.c.App(), client.ParseDigest(id), d.inputLinks(), d)
+	}
+	return link(d.c, target, inner, d)
+}
+
+func link(c client.Component, target string, inner string, v View) View {
+	tc := strings.SplitN(target, ":", 2)
+	view, id := tc[0], tc[1]
 	switch view {
-	case "action":
-		return NewAction(d.c.App(), client.ParseDigest(id), d)
 	case "file":
-		return NewFile(d.c.App(), client.ParseDigest(id), inner, d)
+		return NewFile(c.App(), client.ParseDigest(id), inner, v)
 	case "queuedOperation":
-		return d
+		return v
 	case "toolInvocation":
-		olv := NewOperationList(d.c, 4, d)
+		olv := NewOperationList(c, 4, v)
 		olv.Filter = "toolInvocationId=" + id
 		return olv
 	case "correlatedInvocations":
-		olv := NewOperationList(d.c, 4, d)
+		olv := NewOperationList(c, 4, v)
 		olv.Filter = "correlatedInvocationsId=" + id
 		olv.Name = "toolInvocations"
 		return olv
+	case "execution":
+		return NewExecution(c, id, v)
 	case "worker":
-		return NewWorker(d.c, id, d)
+		return NewWorker(c, id, v)
 	}
-	return d
+	return v
 }
 
 func getAttr(n *html.Node, k string) (string, error) {

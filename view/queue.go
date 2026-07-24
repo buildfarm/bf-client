@@ -1,6 +1,7 @@
 package view
 
 import (
+	"os"
 	// "google.golang.org/protobuf/encoding/prototext"
 	"container/list"
 	"context"
@@ -53,7 +54,7 @@ type numValue struct {
 	parent *numValue
 }
 
-func (nv numValue) String() string {
+func (nv numValue) String(selected bool) string {
 	return fmt.Sprintf(nv.fmt, nv.value)
 }
 
@@ -127,7 +128,7 @@ func getNumber(title string, v View, action func(int) bool) View {
 		}
 
 		return action(n)
-	}, v)
+	}, UISize(), v)
 }
 
 func (v *Queue) Handle(e ui.Event) View {
@@ -218,8 +219,10 @@ func (v *Queue) Handle(e ui.Event) View {
 			ui.Clear()
 			return NewOperationList(v.c, v.stats.SelectedNode().Value.(*numValue).mode, v)
 		}
-	case "D":
+	case "e":
 		return NewExecution(v.c, "test", v)
+	case "D":
+		return NewDiffMenu(v.c, os.Getenv("HOME") + "/.cache/bf-client/diff", v)
 	case "/":
 		return NewSearch(v.c, v)
 	case "T":
@@ -317,6 +320,7 @@ func (v *Queue) Update() {
 			delete(s.profiles, name)
 	  }
 	} else {
+		panic(err)
 		st, ok := status.FromError(err)
 		if !ok || (st.Code() != codes.Unknown && st.Code() != codes.Unavailable) {
 			panic(err)
@@ -365,7 +369,7 @@ type dims struct {
 }
 
 func nodeDimensions(node *client.TreeNode, level int) dims {
-	d := dims{len(node.Value.String()) + level*2, 1}
+	d := dims{len(node.Value.String(false)) + level*2, 1}
 	if node.Expanded {
 		for _, n := range node.Nodes {
 			nd := nodeDimensions(n, level+1)
@@ -456,7 +460,7 @@ func fetchProfile(v *Queue, worker string, conn *grpc.ClientConn, wg *sync.WaitG
 	profile, err := workerProfile.GetWorkerProfile(ctx, &bfpb.WorkerProfileRequest{})
 	if err == nil {
 		v.s.mutex.Lock()
-		v.s.profiles[worker] = &profileResult{name: worker, profile: profile, stale: 0, message: ""}
+		v.s.profiles[worker] = &profileResult{name: worker, profile: profile, message: ""}
 		v.s.mutex.Unlock()
 	} else {
 		st, ok := status.FromError(err)
@@ -577,7 +581,9 @@ func sortWorkers(profiles []*profileResult, sort int) []*profileResult {
 func renderWorkersInfo(s *stats, meter *client.List, x int, h int, sort int, view int) ui.Drawable {
 	meter.SelectedRowStyle = ui.NewStyle(ui.ColorBlack, ui.ColorWhite)
 	height := Min(len(s.profiles), h-6)
-	meter.SetRect(x, 4, x+161, 4+height+2)
+	width := 159
+	// width = 100
+	meter.SetRect(x, 4, x+width+2, 4+height+2)
 	meter.Title = "Workers"
 
 	wl := 0
@@ -594,7 +600,7 @@ func renderWorkersInfo(s *stats, meter *client.List, x int, h int, sort int, vie
 	plen := len(profiles)
 	rows := make([]fmt.Stringer, plen)
 	for _, p := range profiles {
-		rows[n] = renderWorkerRow(p, wl, view)
+		rows[n] = renderWorkerRow(p, wl, width - wl, view)
 		n++
 	}
 	meter.Rows = rows
@@ -618,7 +624,146 @@ func countBar(used int, slots int) string {
 	return fmt.Sprintf(format_string, used, slots)
 }
 
-func renderWorkerRow(r *profileResult, wl int, view int) Worker {
+func stageAttr(color string, reverse bool) string {
+	attr := "fg:"
+	if reverse {
+		attr += "black,mod:dim,bg:"
+	}
+	return attr + color
+}
+
+func pad(s string, l int) string {
+	return strings.Repeat(" ", l - len(s)) + s
+}
+
+/* needs so much more */
+/* expand direction, reasonable width over entire worker */
+func renderStage(color string, used int32, capacity int32, right bool, vw *int) string {
+	c := len(fmt.Sprintf("%d", capacity))
+	*vw = c * 2 + 5
+	return renderStageExpand(color, int(used), int(capacity), right, c, *vw)
+}
+
+func renderStageExpand(color string, used int, capacity int, right bool, c int, w int) string {
+	text := ""
+	if used >= w {
+		if capacity == 0 {
+			text = fmt.Sprintf(" %d ", used)
+		} else {
+			u := fmt.Sprintf("%d", used)
+			text = fmt.Sprintf(" %s/%d ", pad(u, c), capacity)
+		}
+		p := w - len(text)
+		// hopefully p > 0
+		text = strings.Repeat("#", (p + 1) / 2) + text + strings.Repeat("#", (p / 2))
+	} else {
+		text = strings.Repeat("#", used)
+		if right {
+			text = pad(text, w)
+		} else {
+			text += strings.Repeat(" ", w - used)
+		}
+	}
+	attr := stageAttr(color, used >= capacity)
+	return fmt.Sprintf("[%s](%s)", text, attr)
+}
+
+func getStage(profile *bfpb.WorkerProfileMessage, name string) *bfpb.StageInformation {
+	for _, stage := range profile.Stages {
+		if stage.Name == name {
+			return stage
+		}
+	}
+	return nil
+}
+
+func renderWorkerRow(r *profileResult, wl int, gl int, view int) Worker {
+	var profile *bfpb.WorkerProfileMessage
+	if r == nil {
+		r = &profileResult{profile: &bfpb.WorkerProfileMessage{}, stale: 1, message: "uninitialized"}
+	}
+	profile = r.profile
+
+	type column struct {
+		name string
+		expand bool
+		color string
+		stage bool
+		right bool
+	}
+	execColor := ""
+	if view == 1 {
+		execColor = "yellow"
+	} else {
+		execColor = "red"
+	}
+	columns := []column {
+		column { name: "Worker Name" },
+		column { name: "sep" },
+		column { name: "InputFetchStage", color: "blue", right: true, stage: true },
+		column { name: "ExecuteActionStage", color: execColor, stage: true, expand: true },
+		column { name: "ReportResultStage", color: "green", stage: true },
+		column { name: "stale" },
+	}
+	data := map[string]string {}
+
+	// get wl out of here
+	data["Worker Name"] = pad(profile.Name, wl)
+	sep := ": "
+	gl -= len(sep)
+	data["sep"] = sep
+	stale := "      "
+	if r.stale != 0 {
+		stale = " stale"
+	}
+	gl -= len(stale)
+	data["stale"] = stale
+
+	expansions := 0
+	for _, column := range columns {
+		if column.expand {
+			expansions++
+		} else if column.stage {
+			stage := getStage(profile, column.name)
+
+			if stage != nil {
+				var vw int
+				data[column.name] = renderStage(column.color, stage.SlotsUsed, stage.SlotsConfigured, column.right, &vw)
+				gl -= vw
+			} else {
+				data[column.name] = " NO DATA "
+			}
+		}
+	}
+
+	ew := gl / expansions
+
+	row := ""
+	for _, column := range columns {
+		if column.stage && column.expand {
+			stage := getStage(profile, column.name)
+
+			if stage != nil {
+				used, capacity := int(stage.SlotsUsed), int(stage.SlotsConfigured)
+				if view == 1 && column.name == "ExecuteActionStage" {
+					used, capacity = len(stage.OperationNames) + len(stage.Executions), 0
+				}
+				row += renderStageExpand(column.color, used, capacity, false, len(fmt.Sprintf("%d", capacity)), ew)
+			} else {
+				row += pad(" NO DATA ", ew)
+			}
+		} else {
+			row += data[column.name]
+		}
+	}
+
+	return Worker{
+		w:   r.name,
+		row: row,
+	}
+}
+
+func xrenderWorkerRow(r *profileResult, wl int, gl int, view int) Worker {
 	var profile *bfpb.WorkerProfileMessage
 	if r == nil {
 		r = &profileResult{profile: &bfpb.WorkerProfileMessage{}, stale: 1, message: "uninitialized"}
@@ -691,6 +836,7 @@ func renderWorkerRow(r *profileResult, wl int, view int) Worker {
 	}
 	if execute_action_used == execute_action_slots {
 		row += "fg:black,mod:dim,bg:" + execute_color
+		panic(row)
 	} else {
 		row += "fg:" + execute_color
 	}

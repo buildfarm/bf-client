@@ -1,6 +1,7 @@
 package view
 
 import (
+	"strings"
 	"github.com/gizak/termui/v3/widgets"
 	ui "github.com/gizak/termui/v3"
 )
@@ -8,54 +9,55 @@ import (
 type TextEntry struct {
 	paragraph *widgets.Paragraph
 
+	content string
+
 	size ui.Resize
 
 	action func (string) bool
 
 	v View
+
+	focus bool
 }
 
-func NewTextEntry(title string, action func (string) bool, v View) View {
-	var size ui.Resize
-	size.Width, size.Height = ui.TerminalDimensions()
+func NewTextEntry(title string, action func (string) bool, size ui.Resize, v View) *TextEntry {
 	paragraph := widgets.NewParagraph()
 	paragraph.Title = title
-	paragraph.Text = "_"
 	return &TextEntry {
 		paragraph: paragraph,
 		size: size,
 		action: action,
 		v: v,
+		focus: true,
 	}
 }
 
 func (textEntry *TextEntry) Handle(e ui.Event) View {
-	p := textEntry.paragraph
 	switch e.ID {
 	case "<Enter>":
-	  if textEntry.action(p.Text[:len(p.Text)-1]) {
+	  if textEntry.action(textEntry.content) {
 			return textEntry.v
 		}
 	case "<Escape>":
 		return textEntry.v
 	case "<Backspace>":
-	  if len(p.Text) > 1 {
-			p.Text = p.Text[:len(p.Text)-2] + "_"
+		if len(textEntry.content) > 0 {
+			textEntry.content = textEntry.content[:len(textEntry.content)-1]
 		}
 	case "<C-u>":
-	  p.Text = "_"
+	  textEntry.content = ""
 	case "<Space>":
 	  e.ID = " "
 		fallthrough
 	default:
-	  p.Text = p.Text[:len(p.Text)-1] + e.ID + "_"
+	  textEntry.content += e.ID
 	}
 	return textEntry
 }
 
 func (textEntry *TextEntry) Update() {
 	width := 40
-	height := 3
+	height := strings.Count(textEntry.content, "\n") + 3
 	midx := textEntry.size.Width / 2
 	midy := textEntry.size.Height / 2
 	x := midx - width / 2
@@ -64,5 +66,9 @@ func (textEntry *TextEntry) Update() {
 }
 
 func (textEntry TextEntry) Render() []ui.Drawable {
+	textEntry.paragraph.Text = textEntry.content
+	if textEntry.focus {
+		textEntry.paragraph.Text += "_"
+	}
 	return []ui.Drawable{textEntry.paragraph}
 }

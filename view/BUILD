@@ -9,6 +9,7 @@ go_library(
         "file.go",
         "input.go",
         "operation_list.go",
+        "operation_diff.go",
         "queue.go",
         "search.go",
         "search_results.go",
@@ -18,6 +19,8 @@ go_library(
         "util.go",
         "view.go",
         "worker.go",
+        "diff_menu.go",
+        "diff.go",
     ],
     importpath = "github.com/werkt/bf-client/view",
     visibility = ["//visibility:public"],
@@ -40,5 +43,6 @@ go_library(
         "@org_golang_x_net//html:go_default_library",
         "@remoteapis//build/bazel/remote/execution/v2:go_default_library",
         "@org_golang_google_protobuf//encoding/prototext:go_default_library",
+        "@org_golang_google_protobuf//encoding/protodelim:go_default_library",
     ],
 )

@@ -9,3 +9,9 @@ type View interface {
 	Update()
 	Render() []ui.Drawable
 }
+
+func UISize() ui.Resize {
+	var size ui.Resize
+	size.Width, size.Height = ui.TerminalDimensions()
+	return size
+}

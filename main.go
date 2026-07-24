@@ -53,11 +53,7 @@ func (c *baseComponent) Close() {
 }
 
 func (c *baseComponent) Run() client.Component {
-	w, h := ui.TerminalDimensions()
-	c.dimensions = ui.Resize {
-		Width: w,
-		Height: h,
-	}
+	c.dimensions = view.UISize()
 	uiEvents := ui.PollEvents()
 	lastFrameLimit := c.a.FrameLimit
 	ticker := time.NewTicker(time.Second / time.Duration(c.a.FrameLimit)).C

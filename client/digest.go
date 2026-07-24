@@ -51,6 +51,16 @@ func inferDigestFunction(h string) reapi.DigestFunction_Value {
 	return reapi.DigestFunction_UNKNOWN
 }
 
+func ParseREDigest(s string) reapi.Digest {
+	c := strings.Split(s, "/")
+	hash := c[0]
+	size, _ := strconv.ParseInt(c[1], 10, 64)
+	return reapi.Digest{
+		Hash:           hash,
+		SizeBytes:      size,
+	}
+}
+
 func ParseDigest(s string) bfpb.Digest {
 	c := strings.Split(s, "/")
 	var df reapi.DigestFunction_Value

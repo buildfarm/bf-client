@@ -2,6 +2,7 @@ package view
 
 import (
 	"fmt"
+	"strings"
 	reapi "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	bfpb "github.com/buildfarm/buildfarm/build/buildfarm/v1test"
 	"github.com/gammazero/deque"
@@ -14,19 +15,88 @@ import (
 
 type nodeAction func (d bfpb.Digest, s string) View
 
+type nodeKind int
+
+const (
+	kindHard nodeKind = iota
+	kindLink
+	kindContainsLink
+	kindUnderLink
+)
+
 type nodeValue struct {
-	name   string
-	size   int
-	digest bfpb.Digest
-	action nodeAction
+	name    string
+	size    int
+	digest  bfpb.Digest
+	action  nodeAction
+	kind    nodeKind
+	parent *nodeValue
 }
 
-func (nv nodeValue) String() string {
-	if nv.size == 0 {
-		return nv.name
+func styleRender(s string, style ui.Style) string {
+	params := []string{}
+	if (style.Modifier & ui.ModifierReverse) == ui.ModifierReverse {
+		style.Fg, style.Bg = style.Bg, style.Fg
+		if style.Fg == ui.ColorClear {
+			style.Fg = ui.ColorBlack
+		}
 	}
-	// maybe have N / size if opened
-	return fmt.Sprintf("%s (%d) %s", nv.name, nv.size, client.DigestString(nv.digest))
+	for name, color := range ui.StyleParserColorMap {
+		// ew
+		if color == style.Fg {
+			params = append(params, fmt.Sprintf("fg:%s", name))
+		}
+		if color == style.Bg {
+			params = append(params, fmt.Sprintf("bg:%s", name))
+		}
+	}
+	// ParseStyle can't actually deal with more than one, so make it good
+	if (style.Modifier & ui.ModifierBold) == ui.ModifierBold {
+		params = append(params, "mod:bold")
+	}
+	if (style.Modifier & ui.ModifierUnderline) == ui.ModifierUnderline {
+		params = append(params, "mod:underline")
+	}
+	if len(params) > 0 {
+		// still need to do something with brackets in string...
+		s = fmt.Sprintf("[%s](%s)", s, strings.Join(params, ","))
+	}
+	return s
+}
+
+func (nv nodeValue) color(selected bool) string {
+	modifier := ui.ModifierClear
+	if selected {
+		modifier |= ui.ModifierReverse
+	}
+	color := ui.ColorWhite
+	switch nv.kind {
+	case kindContainsLink:
+		color = ui.ColorYellow
+		modifier |= ui.ModifierBold
+	case kindLink: color = ui.ColorBlue
+	case kindUnderLink: color = ui.ColorGreen
+	}
+	style := ui.Theme.Tree.Text
+	style.Fg = color
+	style.Modifier = modifier
+	return styleRender(nv.name, style)
+}
+
+func (nv nodeValue) String(selected bool) string {
+	s := nv.color(selected)
+	if nv.size != 0 {
+		// maybe have N / size if opened
+		modifier := ui.ModifierClear
+		if selected {
+			modifier |= ui.ModifierReverse
+		}
+		// would be useful to have the tree hook here for style
+		style := ui.Theme.Tree.Text
+		style.Modifier = modifier
+		s += styleRender(fmt.Sprintf(" (%d) %s", nv.size, client.DigestString(nv.digest)), style)
+	}
+	return s
 }
 
 type inputView struct {
@@ -36,14 +106,16 @@ type inputView struct {
 	err   error
 	nodes []*client.TreeNode
 	t     *client.Tree
+	l     map[string]bool
 	v     View
 }
 
-func NewInput(a *client.App, d bfpb.Digest, v View) View {
+func NewInput(a *client.App, d bfpb.Digest, l map[string]bool, v View) View {
 	return &inputView{
 		a: a,
 		d: d,
 		v: v,
+		l: l,
 	}
 }
 
@@ -67,7 +139,11 @@ func (v *inputView) Update() {
 	t.SelectedRowStyle = ui.NewStyle(ui.ColorBlack, ui.ColorWhite)
 	root := client.DigestString(v.d)
 	sizes := make(map[string]int)
-	v.nodes = createInputNodes(v.i[root], root, v.d.DigestFunction, v.i, sizes, v.onFile)
+	kind := kindHard
+	if v.l[""] { // input... could be a link?
+		kind = kindUnderLink
+	}
+	v.nodes = createInputNodes(v.i[root], root, "", v.d.DigestFunction, v.i, v.l, sizes, v.onFile, kind, nil)
 	t.SetNodes(v.nodes)
 	// setting this on every frame seems to jank it up
 	w, h := ui.TerminalDimensions()
@@ -190,19 +266,44 @@ func (s *weightSorter) Less(i, j int) bool {
 	return !s.by(s.nodes[i], s.nodes[j])
 }
 
-func createInputNodes(d *reapi.Directory, dd string, df reapi.DigestFunction_Value, i map[string]*reapi.Directory, sizes map[string]int, fa nodeAction) []*client.TreeNode {
+func createInputNodes(
+	d *reapi.Directory,
+	dd string,
+	p string,
+	df reapi.DigestFunction_Value,
+	i map[string]*reapi.Directory,
+	l map[string]bool,
+	sizes map[string]int,
+	fa nodeAction,
+	kind nodeKind,
+        parent *nodeValue) []*client.TreeNode {
 	nodes := []*client.TreeNode{}
 	size := 0
 	for _, n := range d.Directories {
 		digest := client.ToDigest(*n.Digest, df)
 		child := client.DigestString(digest)
-		childNodes := createInputNodes(i[child], child, df, i, sizes, fa)
-		childSize := sizes[child]
+		// if we are either a link or a child of link, specify that the child is underLink
+		childKind := kindHard
+		if kind == kindLink || kind == kindUnderLink {
+			childKind = kindUnderLink
+		}
+		cp := p + n.Name + "/"
+		if l[cp] {
+			childKind = kindLink
+			kind = kindContainsLink
+			// traverse upwards when we hit a link
+			for n := parent; n != nil && n.kind != kindLink && n.kind != kindContainsLink; n = n.parent {
+				n.kind = kindContainsLink
+			}
+		}
+		childNode := &nodeValue{name: n.Name, digest: digest, parent: parent, kind: childKind}
+		gcNodes := createInputNodes(i[child], child, cp, df, i, l, sizes, fa, childKind, childNode)
+		childNode.size = sizes[child]
 		nodes = append(nodes, &client.TreeNode{
-			Value: &nodeValue{name: n.Name, size: childSize, digest: digest},
-			Nodes: childNodes,
+			Value: childNode,
+			Nodes: gcNodes,
 		})
-		size += childSize
+		size += childNode.size
 	}
 	size += len(d.Files)
 	for _, n := range d.Files {
