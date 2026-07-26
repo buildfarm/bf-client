@@ -8,6 +8,7 @@ go_library(
         "execution.go",
         "file.go",
         "input.go",
+        "message.go",
         "operation_list.go",
         "operation_diff.go",
         "queue.go",

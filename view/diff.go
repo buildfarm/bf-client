@@ -853,6 +853,19 @@ func (d *diff) setFieldFilter(filter string) bool {
 	return true
 }
 
+func saveList(l *client.List, name string, c client.Component, v View) View {
+	path := os.Getenv("HOME") + "/" + name
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+	if err != nil {
+		panic(err)
+	}
+	defer file.Close()
+	for _, s := range l.Rows {
+		fmt.Fprintln(file, s.String())
+	}
+	return NewMessage("List Saved to " + path, c, v)
+}
+
 func (d *diff) Handle(e ui.Event) View {
 	switch e.ID {
 	case "<Escape>", "q", "<C-c>":
@@ -865,6 +878,10 @@ func (d *diff) Handle(e ui.Event) View {
 	case "<Up>", "k":
 		if d.l.Focused {
 			d.l.ScrollUp()
+		}
+	case "S":
+		if d.l.Focused {
+			return saveList(d.l, d.name + "-commands.txt", d.c, d)
 		}
 	case "<Left>", "h":
 		d.alignedField = (d.alignedField + ALIGNED_FIELDS - 1) % ALIGNED_FIELDS
