@@ -45,7 +45,6 @@ type operationList struct {
 	v          View
 	field      int
 	reversed   bool
-	queues     []*client.Queue
 	fetchToken string
 	grouped    bool
 
@@ -57,7 +56,6 @@ type operationList struct {
 
 func NewOperationList(c client.Component, mode int, v View) *operationList {
 	opcache, _ := lru.New[string, operation](10000)
-	var queues []*client.Queue
 	if mode != 3 {
 		cl := bfpb.NewOperationQueueClient(c.App().Conn)
 		start := time.Now()
@@ -77,9 +75,6 @@ func NewOperationList(c client.Component, mode int, v View) *operationList {
 				names = append(names, queue.Name)
 			}
 		}
-		for _, name := range names {
-			queues = append(queues, client.NewQueue(context.Background(), c.App().Client, name))
-		}
 	}
 	return &operationList{
 		Name:       "executions",
@@ -90,21 +85,9 @@ func NewOperationList(c client.Component, mode int, v View) *operationList {
 		field:      0,
 		reversed:   false,
 		v:          v,
-		queues:     queues,
 		fetchToken: "",
 		prevNames:  make(map[string]*longrunning.Operation),
 	}
-}
-
-func (v operationList) fetchQueues(max int64, cb func(string) (*client.Operation, error)) []*client.Operation {
-	var ops []*client.Operation
-	for _, queue := range v.queues {
-		ops = append(ops, queue.Slice(context.Background(), v.c.App().Client, 0, max, cb)...)
-		if int64(len(ops)) >= max {
-			break
-		}
-	}
-	return ops
 }
 
 func (v *operationList) fetchIteration(c longrunning.OperationsClient) {
@@ -238,18 +221,6 @@ func (v operationList) xfetchFiltered(filter string, name string) []*client.Oper
 		nextPageToken = r.NextPageToken
 	}
 	return ops
-}
-
-func (v operationList) queuesLength() int64 {
-	var sum int64 = 0
-	for _, queue := range v.queues {
-		l, err := queue.Length(context.Background(), v.c.App().Client)
-		if err != nil {
-			panic(err)
-		}
-		sum += int64(l)
-	}
-	return sum
 }
 
 func (v *operationList) fetch() []*client.Operation {

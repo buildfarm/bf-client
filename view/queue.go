@@ -398,13 +398,13 @@ func treeDimensions(t *client.Tree) dims {
 func (v Queue) Render() []ui.Drawable {
 	s := v.s
 	p := widgets.NewParagraph()
-	p.Text = fmt.Sprintf("%v: %v\n%v: %v\n%v", v.c.App().RedisHost, v.c.App().LastRedisLatency, v.c.App().ReapiHost, v.c.App().LastReapiLatency, formatTime(s.last))
-	p.SetRect(0, 0, 80, 5)
+	p.Text = fmt.Sprintf("%v: %v\n%v", v.c.App().ReapiHost, v.c.App().LastReapiLatency, formatTime(s.last))
+	p.SetRect(0, 0, 80, 4)
 
 	d := treeDimensions(v.stats)
 	d.width += 4
-	d.height += 6
-	v.stats.SetRect(0, 4, d.width, d.height)
+	d.height += 3
+	v.stats.SetRect(0, 3, d.width, d.height)
 
 	var info ui.Drawable
 	if v.stats.SelectedRow == 0 {
@@ -440,7 +440,7 @@ func (v Queue) Render() []ui.Drawable {
 		for ; n < 60; n++ {
 			plot.Data[0][59-n] = float64(0)
 		}
-		plot.SetRect(d.width, 4, d.width+71, 30)
+		plot.SetRect(d.width, 3, d.width+71, 30)
 		plot.AxesColor = ui.ColorWhite
 		plot.Marker = widgets.MarkerBraille
 		plot.PlotType = widgets.ScatterPlot
@@ -583,7 +583,7 @@ func renderWorkersInfo(s *stats, meter *client.List, x int, h int, sort int, vie
 	height := Min(len(s.profiles), h-6)
 	width := 159
 	// width = 100
-	meter.SetRect(x, 4, x+width+2, 4+height+2)
+	meter.SetRect(x, 3, x+width+2, 4+height+2)
 	meter.Title = "Workers"
 
 	wl := 0

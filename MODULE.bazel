@@ -35,7 +35,6 @@ use_repo(
     "com_github_hashicorp_golang_lru_v2",
     "com_github_mattn_go_runewidth",
     "com_github_nsf_termbox_go",
-    "com_github_redis_go_redis_v9",
     "com_google_cloud_go_longrunning",
     "com_lukechampine_blake3",
     "org_golang_google_genproto",
