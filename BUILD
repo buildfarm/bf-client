@@ -6,7 +6,7 @@ gazelle(name = "gazelle")
 go_library(
     name = "go_default_library",
     srcs = ["main.go"],
-    importpath = "github.com/werkt/bf-client",
+    importpath = "github.com/buildfarm/bf-client",
     visibility = ["//visibility:private"],
     deps = [
         "//client:go_default_library",

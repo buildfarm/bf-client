@@ -18,7 +18,7 @@ go_library(
         "tree.go",
         "unified_redis.go",
     ],
-    importpath = "github.com/werkt/bf-client/client",
+    importpath = "github.com/buildfarm/bf-client/client",
     visibility = ["//visibility:public"],
     deps = [
         "//third_party/buildfarm:go_default_library",

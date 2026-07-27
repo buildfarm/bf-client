@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 	ui "github.com/gizak/termui/v3"
-	"github.com/werkt/bf-client/client"
+	"github.com/buildfarm/bf-client/client"
 	"google.golang.org/genproto/googleapis/longrunning"
 	reapi "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	"golang.org/x/net/html"

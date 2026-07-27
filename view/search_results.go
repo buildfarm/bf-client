@@ -9,7 +9,7 @@ import (
 
 	reapi "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	ui "github.com/gizak/termui/v3"
-	"github.com/werkt/bf-client/client"
+	"github.com/buildfarm/bf-client/client"
 	"google.golang.org/genproto/googleapis/longrunning"
 )
 

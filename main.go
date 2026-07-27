@@ -10,8 +10,8 @@ import (
 	ui "github.com/gizak/termui/v3"
 	"github.com/gizak/termui/v3/widgets"
 
-	"github.com/werkt/bf-client/client"
-	"github.com/werkt/bf-client/view"
+	"github.com/buildfarm/bf-client/client"
+	"github.com/buildfarm/bf-client/view"
 
 	tm "github.com/nsf/termbox-go"
 )

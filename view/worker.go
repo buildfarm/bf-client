@@ -14,7 +14,7 @@ import (
 	ui "github.com/gizak/termui/v3"
 	"github.com/gizak/termui/v3/widgets"
 	"github.com/golang/protobuf/ptypes"
-	"github.com/werkt/bf-client/client"
+	"github.com/buildfarm/bf-client/client"
 	"google.golang.org/genproto/googleapis/longrunning"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

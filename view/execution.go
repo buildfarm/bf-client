@@ -12,7 +12,7 @@ import (
 	ui "github.com/gizak/termui/v3"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
-	"github.com/werkt/bf-client/client"
+	"github.com/buildfarm/bf-client/client"
 	"golang.org/x/net/html"
 
 	"google.golang.org/genproto/googleapis/longrunning"

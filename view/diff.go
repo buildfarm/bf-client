@@ -18,7 +18,7 @@ import (
 	"github.com/golang/protobuf/ptypes"
 	"google.golang.org/genproto/googleapis/longrunning"
 	"google.golang.org/protobuf/encoding/protodelim"
-	"github.com/werkt/bf-client/client"
+	"github.com/buildfarm/bf-client/client"
 	reapi "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 )
 

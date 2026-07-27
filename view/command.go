@@ -6,7 +6,7 @@ import (
 	ui "github.com/gizak/termui/v3"
 	"github.com/gizak/termui/v3/widgets"
 	"github.com/golang/protobuf/proto"
-	"github.com/werkt/bf-client/client"
+	"github.com/buildfarm/bf-client/client"
 )
 
 type commandView struct {

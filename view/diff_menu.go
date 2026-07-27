@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"slices"
 	ui "github.com/gizak/termui/v3"
-	"github.com/werkt/bf-client/client"
+	"github.com/buildfarm/bf-client/client"
 )
 
 type diffMenu struct {

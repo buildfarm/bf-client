@@ -1,4 +1,4 @@
-module github.com/werkt/bf-client
+module github.com/buildfarm/bf-client
 
 go 1.23
 

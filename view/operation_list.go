@@ -15,7 +15,7 @@ import (
 	ui "github.com/gizak/termui/v3"
 	"github.com/golang/protobuf/ptypes"
 	"github.com/hashicorp/golang-lru/v2"
-	"github.com/werkt/bf-client/client"
+	"github.com/buildfarm/bf-client/client"
 	"google.golang.org/genproto/googleapis/longrunning"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

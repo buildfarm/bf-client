@@ -8,7 +8,7 @@ import (
 	"github.com/gammazero/deque"
 	ui "github.com/gizak/termui/v3"
 	"github.com/gizak/termui/v3/widgets"
-	"github.com/werkt/bf-client/client"
+	"github.com/buildfarm/bf-client/client"
 	"google.golang.org/grpc"
 	"sort"
 )

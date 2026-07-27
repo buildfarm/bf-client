@@ -23,7 +23,7 @@ go_library(
         "diff_menu.go",
         "diff.go",
     ],
-    importpath = "github.com/werkt/bf-client/view",
+    importpath = "github.com/buildfarm/bf-client/view",
     visibility = ["//visibility:public"],
     deps = [
         "//client:go_default_library",
