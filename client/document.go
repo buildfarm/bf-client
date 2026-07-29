@@ -16,14 +16,36 @@ type styleNode struct {
 	properties map[string]string
 }
 
+func (s styleNode) getInt(name string, defValue int) int {
+	val, ok := s.properties[name]
+	if !ok {
+		return defValue
+	}
+	ival, err := strconv.ParseInt(val, 0, 32)
+	if err != nil {
+		panic(err)
+	}
+	return int(ival)
+}
+
 type Document struct {
 	root   *html.Node
 	styles []styleNode
 }
 
+type line struct {
+	indent int
+	content string
+}
+
+func (l *line) append(s string) {
+	l.content += s
+}
+
 type render struct {
-	d       *Document
-	blocked bool
+	d     *Document
+	lines []line
+	indent int
 }
 
 var defaultTermuiStyles = []styleNode{
@@ -53,6 +75,13 @@ var defaultTermuiStyles = []styleNode{
 	},
 	styleNode{
 		selector: "ul",
+		properties: map[string]string{
+			"display": "block",
+			"padding": "2",
+		},
+	},
+	styleNode{
+		selector: "ol",
 		properties: map[string]string{
 			"display": "block",
 			"padding": "2",
@@ -144,7 +173,7 @@ func (d *Document) RenderSource() string {
 func (d *Document) Render() string {
 	r := render{
 		d:       d,
-		blocked: false,
+		lines: []line{ line { } },
 	}
 	return r.run()
 }
@@ -182,7 +211,12 @@ func hasPseudoClass(n *html.Node, key string) bool {
 }
 
 func (r *render) run() string {
-	return r.node(r.d.root, make([]styleNode, 0), 0)
+	r.node(r.d.root, make([]styleNode, 0))
+	s := ""
+	for _, line := range r.lines {
+		s += strings.Repeat(" ", line.indent) + line.content + "\n"
+	}
+	return s
 }
 
 func parseStyle(s string) styleNode {
@@ -329,9 +363,10 @@ func (r *render) styled(n *html.Node, styles []styleNode) string {
 	return ""
 }
 
-func (r *render) node(n *html.Node, styles []styleNode, x int) string {
+func (r *render) node(n *html.Node, styles []styleNode) {
 	block := false
 	display := "inline"
+
 	if n.Type != html.TextNode {
 		styles = r.findStyles(n)
 		for _, style := range styles {
@@ -342,6 +377,16 @@ func (r *render) node(n *html.Node, styles []styleNode, x int) string {
 			}
 		}
 	}
+
+	visible := true
+	for _, style := range styles {
+		visible = style.properties["display"] != "none"
+	}
+	if !visible {
+		return
+	}
+
+	orig_indent := r.indent
 	for _, style := range styles {
 		val, ok := style.properties["padding"]
 		if ok {
@@ -349,24 +394,33 @@ func (r *render) node(n *html.Node, styles []styleNode, x int) string {
 			if err != nil {
 				panic(err)
 			}
-			x += int(val)
+			r.indent += int(val)
 		}
 	}
-	visible := true
-	for _, style := range styles {
-		visible = style.properties["display"] != "none"
+	ll := len(r.lines) - 1
+	l := &r.lines[ll]
+	if block {
+		if len(l.content) != 0 {
+			// new line, i suppose
+			r.lines = append(r.lines, line { indent: r.indent })
+			l = &r.lines[ll+1]
+		} else {
+			// shift for our new content
+			l.indent = r.indent
+		}
 	}
-	if !visible {
-		return ""
+	if n.Type == html.ElementNode {
+		l.append(fmt.Sprintf("<%s>:", n.Data))
 	}
-	s := r.styled(n, styles)
+	l.append(r.styled(n, styles))
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		if block && (display != "list-item" || c == n.FirstChild) && c.Type == html.TextNode && len(c.Data) != 0 {
-			s += "\n" + strings.Repeat(" ", x)
-		}
-		s += r.node(c, styles, x)
+		r.node(c, styles)
 	}
-	return s
+	r.indent = orig_indent
+	l = &r.lines[len(r.lines) - 1]
+	if block && len(l.content) != 0 {
+		r.lines = append(r.lines, line { content: fmt.Sprintf("Indent: </%s> %d", n.Data, r.indent), indent: r.indent })
+	}
 }
 
 func (d Document) Title() string {

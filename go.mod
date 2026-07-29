@@ -9,6 +9,7 @@ require (
 	github.com/gammazero/deque v0.2.1
 	github.com/gizak/termui/v3 v3.1.0
 	github.com/golang/protobuf v1.5.4
+	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/mattn/go-runewidth v0.0.9
 	github.com/nsf/termbox-go v1.1.1

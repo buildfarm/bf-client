@@ -220,7 +220,7 @@ func (v *Queue) Handle(e ui.Event) View {
 			return NewOperationList(v.c, v.stats.SelectedNode().Value.(*numValue).mode, v)
 		}
 	case "e":
-		return NewExecution(v.c, "test", v)
+		return NewEdit("", v.c, v)
 	case "D":
 		return NewDiffMenu(v.c, os.Getenv("HOME") + "/.cache/bf-client/diff", v)
 	case "/":
@@ -403,7 +403,7 @@ func (v Queue) Render() []ui.Drawable {
 
 	d := treeDimensions(v.stats)
 	d.width += 4
-	d.height += 3
+	d.height += 5
 	v.stats.SetRect(0, 3, d.width, d.height)
 
 	var info ui.Drawable

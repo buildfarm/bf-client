@@ -21,6 +21,7 @@ go_library(
         "//third_party/buildfarm:go_default_library",
         "@com_github_ericchiang_css//:go_default_library",
         "@com_github_gizak_termui_v3//:go_default_library",
+        "@com_github_google_uuid//:go_default_library",
         "@com_github_golang_protobuf//jsonpb:go_default_library",
         "@com_github_golang_protobuf//proto:go_default_library",
         "@com_github_golang_protobuf//ptypes:go_default_library",

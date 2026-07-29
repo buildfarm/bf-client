@@ -13,7 +13,7 @@ import (
 )
 
 type actionView struct {
-	a          *client.App
+	c          client.Component
 	d          bfpb.Digest
 	action     *reapi.Action
 	il         map[string]bool
@@ -28,7 +28,7 @@ type actionView struct {
 	focusAnchor int
 }
 
-func NewAction(a *client.App, d bfpb.Digest, il map[string]bool, v View) View {
+func NewAction(c client.Component, d bfpb.Digest, il map[string]bool, v View) View {
 	doc := client.NewDocument()
 	content := `
   <html>
@@ -58,7 +58,7 @@ func NewAction(a *client.App, d bfpb.Digest, il map[string]bool, v View) View {
 	}
 
 	return &actionView{
-		a:           a,
+		c:           c,
 		d:           d,
 		v:           v,
 		p:           widgets.NewParagraph(),
@@ -76,9 +76,13 @@ func (v *actionView) link(target string) View {
 	view, id := c[0], c[1]
 	switch view {
 	case "command":
-		return NewCommand(v.a, client.ParseDigest(id), v)
+		return NewCommand(v.c.App(), client.ParseDigest(id), v)
 	case "input":
-		return NewInput(v.a, client.ParseDigest(id), v.il, v)
+		return NewInput(v.c.App(), client.ParseDigest(id), v.il, v)
+	case "edit":
+		e := NewEdit("untitled", v.c, v)
+		e.digest = client.ParseDigest(id)
+		return e
 	}
 	return v
 }
@@ -123,7 +127,7 @@ func reDigestString(d reapi.Digest, df reapi.DigestFunction_Value) string {
 func (v *actionView) Update() {
 	if v.action == nil {
 		a := &reapi.Action{}
-		err := client.Expect(v.a.Conn, v.d, a)
+		err := client.Expect(v.c.App().Conn, v.d, a)
 		if err != nil {
 			v.err = err
 		} else {

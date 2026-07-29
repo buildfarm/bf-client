@@ -184,6 +184,10 @@ func ul() node {
 	return el("ul")
 }
 
+func ol() node {
+	return el("ol")
+}
+
 func li() node {
 	return el("li")
 }
@@ -596,7 +600,7 @@ func (d *execution) link(target string, inner string) View {
 	tc := strings.SplitN(target, ":", 2)
 	view, id := tc[0], tc[1]
 	if view == "action" {
-		return NewAction(d.c.App(), client.ParseDigest(id), d.inputLinks(), d)
+		return NewAction(d.c, client.ParseDigest(id), d.inputLinks(), d)
 	}
 	return link(d.c, target, inner, d)
 }

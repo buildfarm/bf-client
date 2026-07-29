@@ -1,6 +1,8 @@
 package client
 
 import (
+	"context"
+	"github.com/google/uuid"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -16,6 +18,7 @@ import (
 )
 
 type App struct {
+	Version          string
 	Instance         string
 	ReapiHost        string
 	LastReapiLatency time.Duration
@@ -30,6 +33,9 @@ type App struct {
 	Fetches          uint
 	Mutex            *sync.Mutex
 
+	Capabilities    reapi.ServerCapabilities
+	Id              uuid.UUID
+
 	FrameLimit      int
 	SkipFrames      int
 	UpdateCountdown int
@@ -37,6 +43,7 @@ type App struct {
 
 func NewApp(reapiHost string, ca string) *App {
 	return &App{
+		Version:     "0.0.0",
 		Instance:    "shard",
 		ReapiHost:   reapiHost,
 		CA:          ca,
@@ -47,6 +54,7 @@ func NewApp(reapiHost string, ca string) *App {
 		workerConns: make(map[string]*grpc.ClientConn),
 		Mutex:       &sync.Mutex{},
 		FrameLimit:  60,
+		Id:          uuid.New(),
 	}
 }
 
@@ -59,6 +67,13 @@ func (a *App) GetWorkerConn(worker string, ca string) *grpc.ClientConn {
 
 func (a *App) Connect() {
 	a.Conn = connect(a.ReapiHost, a.CA)
+
+	cc := reapi.NewCapabilitiesClient(a.Conn)
+	cap, err := cc.GetCapabilities(context.Background(), &reapi.GetCapabilitiesRequest { InstanceName: a.Instance })
+	if err != nil {
+		panic(err)
+	}
+	a.Capabilities = *cap
 }
 
 func connect(host string, ca string) *grpc.ClientConn {
