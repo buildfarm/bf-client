@@ -9,11 +9,14 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"math"
 	"os"
 	"strings"
 	"sync"
 	"time"
 )
+
+const DefaultFramesPerSecond = 60
 
 type App struct {
 	Instance         string
@@ -30,24 +33,49 @@ type App struct {
 	Fetches          uint
 	Mutex            *sync.Mutex
 
-	FrameLimit      int
-	SkipFrames      int
-	UpdateCountdown int
+	FramesPerSecond  int
+	UpdatesPerSecond float64
+	UpdateCountdown  int
 }
 
 func NewApp(reapiHost string, ca string) *App {
 	return &App{
-		Instance:    "shard",
-		ReapiHost:   reapiHost,
-		CA:          ca,
-		Ops:         make(map[string]*longrunning.Operation),
-		Actions:     make(map[string]*reapi.Action),
-		Metadatas:   make(map[string]*reapi.RequestMetadata),
-		Invocations: make(map[string][]string),
-		workerConns: make(map[string]*grpc.ClientConn),
-		Mutex:       &sync.Mutex{},
-		FrameLimit:  60,
+		Instance:         "shard",
+		ReapiHost:        reapiHost,
+		CA:               ca,
+		Ops:              make(map[string]*longrunning.Operation),
+		Actions:          make(map[string]*reapi.Action),
+		Metadatas:        make(map[string]*reapi.RequestMetadata),
+		Invocations:      make(map[string][]string),
+		workerConns:      make(map[string]*grpc.ClientConn),
+		Mutex:            &sync.Mutex{},
+		FramesPerSecond:  DefaultFramesPerSecond,
+		UpdatesPerSecond: DefaultFramesPerSecond,
 	}
+}
+
+func ValidUpdatesPerSecond(ups float64) bool {
+	return ups > 0 && !math.IsInf(ups, 1)
+}
+
+func (a *App) SetRates(fps int, ups float64) {
+	ups = min(float64(fps), ups)
+	if fps == a.FramesPerSecond && ups == a.UpdatesPerSecond {
+		return
+	}
+	a.FramesPerSecond = fps
+	a.UpdatesPerSecond = ups
+	a.UpdateCountdown = 0
+}
+
+func (a *App) FramesToSkip() int {
+	// Round the frames between updates up so the update rate stays within the limit.
+	frames := math.Ceil(float64(a.FramesPerSecond) / a.UpdatesPerSecond)
+	// A very small update rate can exceed the countdown's integer range.
+	if frames >= float64(math.MaxInt) {
+		return math.MaxInt
+	}
+	return int(frames) - 1
 }
 
 func (a *App) GetWorkerConn(worker string, ca string) *grpc.ClientConn {

@@ -1,19 +1,19 @@
 package view
 
 import (
-	"fmt"
+	"strconv"
+	"time"
+
+	"github.com/buildfarm/bf-client/client"
 	ui "github.com/gizak/termui/v3"
 	"github.com/gizak/termui/v3/widgets"
-	"github.com/buildfarm/bf-client/client"
-	"strconv"
 )
 
 type settings struct {
-	a               *client.App
-	v               View
-	limitEntry      *entry
-	skipFramesEntry *entry
-	layout          []ui.Drawable
+	v        View
+	fpsEntry *entry
+	upsEntry *entry
+	layout   []ui.Drawable
 }
 
 type entry struct {
@@ -61,44 +61,53 @@ func (e *entry) handle(ue ui.Event) {
 }
 
 func newSettings(a *client.App, v View) View {
-	limit := widgets.NewParagraph()
-	limit.SetRect(10, 15, 20, 18)
-	limit.Border = false
-	limit.Text = "Frame Limit"
+	fpsLabel := widgets.NewParagraph()
+	fpsLabel.SetRect(10, 15, 25, 18)
+	fpsLabel.Border = false
+	fpsLabel.Text = "Frames/sec"
 
-	limitEntry := newEntry()
-	limitEntry.SetRect(22, 15, 32, 18)
-	limitEntry.Text = fmt.Sprintf("%d", a.FrameLimit)
-	limitEntry.focus()
+	fpsEntry := newEntry()
+	fpsEntry.SetRect(25, 15, 47, 18)
+	fpsEntry.Text = strconv.Itoa(a.FramesPerSecond)
+	fpsEntry.focus()
 
-	skip := widgets.NewParagraph()
-	skip.SetRect(10, 20, 20, 23)
-	skip.Border = false
-	skip.Text = "Update Frame Skip"
+	upsLabel := widgets.NewParagraph()
+	upsLabel.SetRect(10, 20, 25, 23)
+	upsLabel.Border = false
+	upsLabel.Text = "Updates/sec"
 
-	skipEntry := newEntry()
-	skipEntry.Text = fmt.Sprintf("%d", a.SkipFrames)
-	skipEntry.SetRect(22, 20, 32, 23)
+	upsText := func() string {
+		return strconv.FormatFloat(a.UpdatesPerSecond, 'g', -1, 64)
+	}
+	upsEntry := newEntry()
+	upsEntry.SetRect(25, 20, 52, 23)
+	upsEntry.Text = upsText()
 
-	settings := &settings{
-		a:               a,
-		v:               v,
-		limitEntry:      limitEntry,
-		skipFramesEntry: skipEntry,
-		layout:          []ui.Drawable{limit, skip, limitEntry, skipEntry},
+	fpsEntry.onEnter = func(s string) string {
+		if fps, err := strconv.Atoi(s); err == nil && fps > 0 && fps <= int(time.Second) {
+			a.SetRates(fps, a.UpdatesPerSecond)
+			upsEntry.Text = upsText()
+		}
+		return strconv.Itoa(a.FramesPerSecond)
+	}
+	upsEntry.onEnter = func(s string) string {
+		if ups, err := strconv.ParseFloat(s, 64); err == nil {
+			if ups == 0 {
+				ups = 1
+			}
+			if client.ValidUpdatesPerSecond(ups) {
+				a.SetRates(a.FramesPerSecond, ups)
+			}
+		}
+		return upsText()
 	}
 
-	limitEntry.onEnter = func(s string) string {
-		settings.a.FrameLimit, _ = strconv.Atoi(s)
-		return fmt.Sprintf("%d", settings.a.FrameLimit)
+	return &settings{
+		v:        v,
+		fpsEntry: fpsEntry,
+		upsEntry: upsEntry,
+		layout:   []ui.Drawable{fpsLabel, upsLabel, fpsEntry, upsEntry},
 	}
-	skipEntry.onEnter = func(s string) string {
-		settings.a.SkipFrames, _ = strconv.Atoi(s)
-		settings.a.UpdateCountdown = 0
-		return fmt.Sprintf("%d", settings.a.SkipFrames)
-	}
-
-	return settings
 }
 
 func (s *settings) Update() {
@@ -107,22 +116,22 @@ func (s *settings) Update() {
 func (s *settings) Handle(e ui.Event) View {
 	switch e.ID {
 	case "<Tab>":
-		if s.limitEntry.focused {
-			s.limitEntry.defocus()
-			s.skipFramesEntry.focus()
+		if s.fpsEntry.focused {
+			s.fpsEntry.defocus()
+			s.upsEntry.focus()
 		} else {
-			s.skipFramesEntry.defocus()
-			s.limitEntry.focus()
+			s.upsEntry.defocus()
+			s.fpsEntry.focus()
 		}
 		return s
 	case "<Escape>":
 		return s.v
 	}
 
-	if s.limitEntry.focused {
-		s.limitEntry.handle(e)
-	} else if s.skipFramesEntry.focused {
-		s.skipFramesEntry.handle(e)
+	if s.fpsEntry.focused {
+		s.fpsEntry.handle(e)
+	} else if s.upsEntry.focused {
+		s.upsEntry.handle(e)
 	}
 
 	return s
